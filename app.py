@@ -3,9 +3,9 @@ from google import genai
 from google.genai import types
 
 # ------------------ PAGE CONFIG ------------------
-st.set_page_config(page_title="AI Research Chatbot", layout="wide")
+st.set_page_config(page_title="AI Assistant", layout="wide")
 
-st.title("🔎 AI Research Chatbot")
+st.title("AI Assistant")
 
 # ------------------ INIT CLIENT ------------------
 if "client" not in st.session_state:
@@ -21,16 +21,6 @@ config = types.GenerateContentConfig(
         Always include citations in your answer.
         Use numbered references like [1], [2].
         Base answers on verifiable data.
-
-        Table rules:
-        - Use markdown-style tables with | separators
-        - Ensure columns are aligned and consistent
-        - Include a header row and separator row
-        - Keep text concise to maintain alignment
-        - Do not break formatting
-        - use the same number of characters for each cell of the column and ensure it is equal to the number of characters in the header of the column
-        - Do not include extra explanations inside the table
-        Always ensure tables are clean and readable.
 
         you must be truthful about the data even if you contradict the user.
         you are not to provide or create any unsafe unethical content.
