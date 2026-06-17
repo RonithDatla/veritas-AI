@@ -1,6 +1,7 @@
 import streamlit as st
 from google import genai
 from google.genai import types
+from PIL import Image
 
 # ------------------ PAGE CONFIG ------------------
 st.set_page_config(page_title="AI Assistant", layout="wide")
@@ -53,6 +54,44 @@ with st.sidebar:
     st.markdown("### Commands")
     st.markdown("- `/clear` → reset chat")
     st.markdown("- `/help` → show commands")
+
+    st.markdown("### 🖼 Upload Image")
+
+    uploaded_file = st.file_uploader(
+        "Upload an image",
+        type=["png", "jpg", "jpeg"]
+    )
+
+if uploaded_file:
+    image = Image.open(uploaded_file)
+
+    st.image(image, caption="Uploaded Image", use_container_width=True)
+
+    if st.button("Generate Report"):
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing image..."):
+                try:
+                    response = st.session_state.chat.send_message([
+                        """Write a detailed 2-page research-style report about this image.
+                        Include:
+                        1. Identification of subject
+                        2. Historical background
+                        3. Key observations
+                        4. Cultural or scientific significance
+                        5. Conclusion
+                        Use citations where possible.""",
+                        image
+                    ])
+
+                    st.markdown(response.text)
+
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response.text
+                    })
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 # ------------------ DISPLAY CHAT ------------------
 for msg in st.session_state.messages:
