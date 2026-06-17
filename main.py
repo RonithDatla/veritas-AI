@@ -8,7 +8,6 @@ RESET = "\033[0m"
 
 client = genai.Client()
 
-# Search config (unchanged behavior)
 config = types.GenerateContentConfig(
     tools=[types.Tool(google_search=types.GoogleSearch())],
     temperature=0.2,
@@ -18,6 +17,19 @@ config = types.GenerateContentConfig(
         Always include citations in your answer.
         Use numbered references like [1], [2].
         Base answers on verifiable data.
+
+        Table rules:
+        - Use markdown-style tables with | separators
+        - Ensure columns are aligned and consistent
+        - Include a header row and separator row
+        - Keep text concise to maintain alignment
+        - Do not break formatting
+        - use the same number of charecters for each cell of the column and ensure it is equal to the number of charecters in the header of the column
+        - Do not include extra explanations inside the table
+        Always ensure tables are clean and readable in a plain text terminal.
+
+        you must be truthfull about the data even if you contradict the user.
+        you are not to provide or create any unsafe unethical content.
     """
 )
 
@@ -26,7 +38,6 @@ chat = client.chats.create(
     config=config
 )
 
-# Commands
 commands = {
     "/help": "Show all available commands",
     "/exit": "Exit the chatbot",
@@ -39,18 +50,15 @@ while True:
 
     prompt = input(f"{RESET}\nYou: ")
 
-    # Exit
     if prompt.lower() == "/exit":
         print(f"{RESET}")
         break
 
-    # Clear
     if prompt == "/clear":
         chat = client.chats.create(model="gemini-3.5-flash", config=config)
         print("Chat reset.")
         continue
 
-    # Help
     if prompt == "/help":  
         print()      
         print(f"{'Command':<15} Description")
@@ -59,7 +67,6 @@ while True:
             print(f"{cmd:<15} {desc}")
         continue
 
-    # AI response
     try:
         response = chat.send_message(prompt)
     except Exception as e:
@@ -69,7 +76,6 @@ while True:
     print(f"{BLUE}\nAI: ", end="")
     print(response.text)
 
-    # Metadata (citations)
     metadata = None
     if hasattr(response, "candidates") and response.candidates:
         candidate = response.candidates[0]
@@ -86,7 +92,9 @@ while True:
             print(f"{YELLOW}\nSources:")
             seen = set()
             for chunk in metadata.grounding_chunks:
-                url = chunk.web.uri
-                if url not in seen:
-                    print(f" - {url}")
-                    seen.add(url)
+                if hasattr(chunk, "web") and hasattr(chunk.web, "uri"):
+                    url = chunk.web.uri
+                    title = getattr(chunk.web, "title", url)
+                    if url not in seen:
+                        print(f" - {title} ({url})")
+                        seen.add(url)
