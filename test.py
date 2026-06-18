@@ -34,41 +34,48 @@ def create_pdf(text):
     buffer.seek(0)
     return buffer
 
-# ------------------ FILE READERS ------------------
-def read_pdf(file):
+# ------------------ FILE READERS (CACHED) ------------------
+
+@st.cache_data
+def read_pdf_cached(file_bytes):
     try:
-        reader = PdfReader(file)
+        reader = PdfReader(BytesIO(file_bytes))
         return "".join([p.extract_text() or "" for p in reader.pages])
     except:
         return None
 
-def read_docx(file):
+@st.cache_data
+def read_docx_cached(file_bytes):
     try:
-        return "\n".join([p.text for p in Document(file).paragraphs])
+        return "\n".join([p.text for p in Document(BytesIO(file_bytes)).paragraphs])
     except:
         return None
 
-def read_txt(file):
+@st.cache_data
+def read_txt_cached(file_bytes):
     try:
-        return file.read().decode("utf-8", errors="ignore")
+        return file_bytes.decode("utf-8", errors="ignore")
     except:
         return None
 
-def read_csv(file):
+@st.cache_data
+def read_csv_cached(file_bytes):
     try:
-        return pd.read_csv(file).to_string()
+        return pd.read_csv(BytesIO(file_bytes)).to_string()
     except:
         return None
 
-def read_excel(file):
+@st.cache_data
+def read_excel_cached(file_bytes):
     try:
-        return pd.read_excel(file).to_string()
+        return pd.read_excel(BytesIO(file_bytes)).to_string()
     except:
         return None
 
-def read_json(file):
+@st.cache_data
+def read_json_cached(file_bytes):
     try:
-        return json.dumps(json.load(file), indent=2)
+        return json.dumps(json.loads(file_bytes.decode("utf-8")), indent=2)
     except:
         return None
 
@@ -78,10 +85,12 @@ st.title("Veritas AI")
 
 # ------------------ API KEY ------------------
 if "client" not in st.session_state:
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        st.error("Missing GOOGLE_API_KEY")
-        st.stop()
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            st.error("Missing API key try renaming it to GEMINI_API_KEY")
+            st.stop()
     st.session_state.client = genai.Client(api_key=api_key)
 
 # ------------------ STATES ------------------
@@ -150,7 +159,6 @@ with st.sidebar:
     with st.expander("💻 Commands"):
         st.markdown("- /help")
         st.markdown("- /clear")
-        st.markdown("- /mode precise|balanced|creative")
 
     reverse_map = {v: k for k, v in MODE_MAP.items()}
     current_display = reverse_map[st.session_state.mode]
@@ -190,9 +198,10 @@ uploaded_file = st.file_uploader("Attach file")
 
 if uploaded_file:
     file_type = uploaded_file.type or ""
+    file_bytes = uploaded_file.read()
 
     if file_type.startswith("image"):
-        st.session_state.image = Image.open(uploaded_file)
+        st.session_state.image = Image.open(BytesIO(file_bytes))
         st.session_state.file_text = None
         st.image(st.session_state.image)
 
@@ -200,17 +209,17 @@ if uploaded_file:
         st.session_state.image = None
 
         if "pdf" in file_type:
-            text = read_pdf(uploaded_file)
+            text = read_pdf_cached(file_bytes)
         elif "word" in file_type:
-            text = read_docx(uploaded_file)
+            text = read_docx_cached(file_bytes)
         elif file_type == "text/plain":
-            text = read_txt(uploaded_file)
+            text = read_txt_cached(file_bytes)
         elif "csv" in file_type:
-            text = read_csv(uploaded_file)
+            text = read_csv_cached(file_bytes)
         elif "json" in file_type:
-            text = read_json(uploaded_file)
+            text = read_json_cached(file_bytes)
         elif "spreadsheet" in file_type:
-            text = read_excel(uploaded_file)
+            text = read_excel_cached(file_bytes)
         else:
             text = None
 
@@ -258,7 +267,6 @@ user_input = st.chat_input("Ask something...")
 
 if user_input:
 
-    # ------------------ COMMANDS ------------------
     if user_input.lower() == "/clear":
         st.session_state.messages = []
         st.rerun()
@@ -270,7 +278,6 @@ if user_input:
         })
         st.rerun()
 
-    # ------------------ NORMAL CHAT ------------------
     st.session_state.messages.append({
         "role": "user",
         "content": user_input
