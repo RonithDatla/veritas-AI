@@ -2,20 +2,50 @@ import streamlit as st
 from google import genai
 from google.genai import types
 from PIL import Image
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
-# ------------------ PAGE CONFIG ------------------
+def create_pdf(text):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+
+    width, height = letter
+    y = height - 40
+
+    lines = text.split("\n")
+
+    for line in lines:
+        if y < 40:
+            c.showPage()
+            y = height - 40
+
+        c.drawString(40, y, line[:90])
+        y -= 15
+
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+
 st.set_page_config(page_title="AI Assistant", layout="wide")
-
 st.title("AI Assistant")
 
-# ------------------ INIT CLIENT ------------------
+MODES = {
+    "precise": 0.1,
+    "balanced": 0.2,
+    "creative": 0.6
+}
+
+if "mode" not in st.session_state:
+    st.session_state.mode = "Balanced"
+
 if "client" not in st.session_state:
     st.session_state.client = genai.Client()
 
-# ------------------ CONFIG ------------------
 config = types.GenerateContentConfig(
     tools=[types.Tool(google_search=types.GoogleSearch())],
-    temperature=0.2,
+    temperature=MODES[st.session_state.mode.lower()],
     top_p=0.8,
     system_instruction="""
         You are a research assistant.
@@ -28,22 +58,19 @@ config = types.GenerateContentConfig(
     """
 )
 
-# ------------------ INIT CHAT ------------------
 if "chat" not in st.session_state:
     st.session_state.chat = st.session_state.client.chats.create(
         model="gemini-3.5-flash",
         config=config
     )
 
-# ------------------ MESSAGE HISTORY ------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ------------------ SIDEBAR ------------------
 with st.sidebar:
-    st.header("⚙️ Controls")
+    st.header("Controls")
 
-    if st.button("🧹 Clear Chat"):
+    if st.button("Clear Chat"):
         st.session_state.chat = st.session_state.client.chats.create(
             model="gemini-3.5-flash",
             config=config
@@ -52,22 +79,34 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("### Commands")
-    st.markdown("- `/clear` → reset chat")
     st.markdown("- `/help` → show commands")
+    st.markdown("- `/clear` → reset chat")
+    st.markdown("- `/mode ` → change AI mode")
 
-    st.markdown("### 🖼 Upload Image")
+    st.markdown("### Upload Image")
 
     uploaded_file = st.file_uploader(
         "Upload an image",
         type=["png", "jpg", "jpeg"]
     )
 
+    st.markdown(f"### Mode: **{st.session_state.mode}**")
+
+
 if uploaded_file:
     image = Image.open(uploaded_file)
 
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    if st.button("Generate Report"):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        generate_chat = st.button("Generate Report")
+
+    with col2:
+        download_pdf = st.button("Download PDF Report")
+
+    if generate_chat:
         with st.chat_message("assistant"):
             with st.spinner("Analyzing image..."):
                 try:
@@ -93,16 +132,42 @@ if uploaded_file:
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-# ------------------ DISPLAY CHAT ------------------
+    if download_pdf:
+        with st.spinner("Generating PDF..."):
+            try:
+                response = st.session_state.chat.send_message([
+                    """Write a detailed 2-page research-style report about this image.
+                    Include:
+                    1. Identification of subject
+                    2. Historical background
+                    3. Key observations
+                    4. Cultural or scientific significance
+                    5. Conclusion
+                    Use citations where possible.""",
+                    image
+                ])
+
+                pdf_file = create_pdf(response.text)
+
+                st.download_button(
+                    label="Download PDF",
+                    data=pdf_file,
+                    file_name="image_report.pdf",
+                    mime="application/pdf"
+                )
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ------------------ USER INPUT ------------------
+
 user_input = st.chat_input("Ask something...")
 
 if user_input:
-    # Handle commands (like your CLI)
     if user_input.lower() == "/clear":
         st.session_state.chat = st.session_state.client.chats.create(
             model="gemini-3.5-flash",
@@ -116,58 +181,68 @@ if user_input:
         **Commands:**
         - `/help` → Show commands  
         - `/clear` → Reset chat  
+        - `/mode precise|balanced|creative` → Change AI mode
         """
         st.session_state.messages.append({"role": "assistant", "content": help_text})
         st.rerun()
 
+    elif user_input.lower().startswith("/mode"):
+        try:
+            new_mode = user_input.split()[1].lower()
+
+            if new_mode in MODES:
+                st.session_state.mode = new_mode.capitalize()
+
+                new_config = types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=MODES[new_mode],
+                    top_p=0.8,
+                    system_instruction=config.system_instruction
+                )
+
+                st.session_state.chat = st.session_state.client.chats.create(
+                    model="gemini-3.5-flash",
+                    config=new_config
+                )
+
+                st.session_state.messages = []
+
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"Switched to {st.session_state.mode}"
+                })
+
+            else:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "Invalid mode. Use: precise / balanced / creative"
+                })
+
+        except:
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": "Usage: /mode precise | /mode balanced | /mode creative"
+            })
+
+        st.rerun()
+
     else:
-        # Show user message
         st.session_state.messages.append({"role": "user", "content": user_input})
 
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Generate response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
                     response = st.session_state.chat.send_message(user_input)
+
                     st.markdown(response.text)
 
-                    # Save AI response
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": response.text
                     })
-
-                    # ------------- METADATA (SEARCH + SOURCES) -------------
-                    metadata = None
-                    if hasattr(response, "candidates") and response.candidates:
-                        candidate = response.candidates[0]
-                        if hasattr(candidate, "grounding_metadata"):
-                            metadata = candidate.grounding_metadata
-
-                    if metadata:
-
-                        # Show search queries
-                        if metadata.web_search_queries:
-                            st.markdown("### 🔍 Search Queries")
-                            for q in metadata.web_search_queries:
-                                st.markdown(f"- {q}")
-
-                        # Show sources
-                        if metadata.grounding_chunks:
-                            st.markdown("### 🔗 Sources")
-                            seen = set()
-
-                            for chunk in metadata.grounding_chunks:
-                                if hasattr(chunk, "web") and hasattr(chunk.web, "uri"):
-                                    url = chunk.web.uri
-                                    title = getattr(chunk.web, "title", url)
-
-                                    if url not in seen:
-                                        st.markdown(f"- [{title}]({url})")
-                                        seen.add(url)
 
                 except Exception as e:
                     st.error(f"Error: {e}")
