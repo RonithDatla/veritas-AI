@@ -28,8 +28,8 @@ def create_pdf(text):
     return buffer
 
 
-st.set_page_config(page_title="AI Assistant", layout="wide")
-st.title("AI Assistant")
+st.set_page_config(page_title="🔍Veritas AI", layout="wide")
+st.title("🔍Veritas AI")
 
 MODES = {
     "precise": 0.1,
@@ -37,8 +37,14 @@ MODES = {
     "creative": 0.6
 }
 
+MODE_OPTIONS = ["Precise", "Balanced", "Creative"]
+MODEL_OPTIONS = ["gemini-2.5-flash", "gemini-3.5-flash"]
+
 if "mode" not in st.session_state:
     st.session_state.mode = "Balanced"
+
+if "model" not in st.session_state:
+    st.session_state.model = "gemini-3.5-flash"
 
 if "client" not in st.session_state:
     st.session_state.client = genai.Client()
@@ -60,28 +66,54 @@ config = types.GenerateContentConfig(
 
 if "chat" not in st.session_state:
     st.session_state.chat = st.session_state.client.chats.create(
-        model="gemini-3.5-flash",
+        model=st.session_state.model,
         config=config
     )
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+
 with st.sidebar:
     st.header("Controls")
 
     if st.button("Clear Chat"):
         st.session_state.chat = st.session_state.client.chats.create(
-            model="gemini-3.5-flash",
+            model=st.session_state.model,
             config=config
         )
         st.session_state.messages = []
         st.rerun()
 
-    st.markdown("### Commands")
-    st.markdown("- `/help` → show commands")
-    st.markdown("- `/clear` → reset chat")
-    st.markdown("- `/mode ` → change AI mode")
+    # ✅ Commands dropdown
+    with st.expander("Commands"):
+        st.markdown("- `/help` → show commands")
+        st.markdown("- `/clear` → reset chat")
+        st.markdown("- `/mode precise|balanced|creative`")
+
+    # ✅ Mode dropdown
+    selected_mode = st.selectbox("Mode", MODE_OPTIONS, index=MODE_OPTIONS.index(st.session_state.mode))
+
+    if selected_mode != st.session_state.mode:
+        st.session_state.mode = selected_mode
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
+
+    # ✅ Model dropdown
+    selected_model = st.selectbox("Model", MODEL_OPTIONS, index=MODEL_OPTIONS.index(st.session_state.model))
+
+    if selected_model != st.session_state.model:
+        st.session_state.model = selected_model
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
 
     st.markdown("### Upload Image")
 
@@ -89,8 +121,6 @@ with st.sidebar:
         "Upload an image",
         type=["png", "jpg", "jpeg"]
     )
-
-    st.markdown(f"### Mode: **{st.session_state.mode}**")
 
 
 if uploaded_file:
@@ -170,7 +200,7 @@ user_input = st.chat_input("Ask something...")
 if user_input:
     if user_input.lower() == "/clear":
         st.session_state.chat = st.session_state.client.chats.create(
-            model="gemini-3.5-flash",
+            model=st.session_state.model,
             config=config
         )
         st.session_state.messages = []
@@ -184,46 +214,6 @@ if user_input:
         - `/mode precise|balanced|creative` → Change AI mode
         """
         st.session_state.messages.append({"role": "assistant", "content": help_text})
-        st.rerun()
-
-    elif user_input.lower().startswith("/mode"):
-        try:
-            new_mode = user_input.split()[1].lower()
-
-            if new_mode in MODES:
-                st.session_state.mode = new_mode.capitalize()
-
-                new_config = types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
-                    temperature=MODES[new_mode],
-                    top_p=0.8,
-                    system_instruction=config.system_instruction
-                )
-
-                st.session_state.chat = st.session_state.client.chats.create(
-                    model="gemini-3.5-flash",
-                    config=new_config
-                )
-
-                st.session_state.messages = []
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"Switched to {st.session_state.mode}"
-                })
-
-            else:
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": "Invalid mode. Use: precise / balanced / creative"
-                })
-
-        except:
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": "Usage: /mode precise | /mode balanced | /mode creative"
-            })
-
         st.rerun()
 
     else:

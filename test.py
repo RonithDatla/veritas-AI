@@ -1,223 +1,238 @@
+import streamlit as st
 from google import genai
 from google.genai import types
-import pandas as pd
+from PIL import Image
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
-def make_table(data):
-    try:
-        df = pd.DataFrame(data)
-        print(df.to_string(index=False))
-    except Exception as e:
-        print(f"Error creating table: {e}")
+def create_pdf(text):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
 
-GREEN = "\033[92m"
-BLUE = "\033[94m"
-YELLOW = "\033[93m"
-RESET = "\033[0m"
+    width, height = letter
+    y = height - 40
 
-client = genai.Client()
+    lines = text.split("\n")
 
-# SEARCH CONFIG (short + surface-level)
-search_config = types.GenerateContentConfig(
+    for line in lines:
+        if y < 40:
+            c.showPage()
+            y = height - 40
+
+        c.drawString(40, y, line[:90])
+        y -= 15
+
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+
+st.set_page_config(page_title="AI Assistant", layout="wide")
+st.title("AI Assistant")
+
+MODES = {
+    "precise": 0.1,
+    "balanced": 0.2,
+    "creative": 0.6
+}
+
+MODE_OPTIONS = ["Precise", "Balanced", "Creative"]
+MODEL_OPTIONS = ["gemini-2.5-flash", "gemini-3.5-flash"]
+
+if "mode" not in st.session_state:
+    st.session_state.mode = "Balanced"
+
+if "model" not in st.session_state:
+    st.session_state.model = "gemini-3.5-flash"
+
+if "client" not in st.session_state:
+    st.session_state.client = genai.Client()
+
+config = types.GenerateContentConfig(
     tools=[types.Tool(google_search=types.GoogleSearch())],
-    temperature=0.2,
+    temperature=MODES[st.session_state.mode.lower()],
     top_p=0.8,
     system_instruction="""
         You are a research assistant.
+        Always include citations in your answer.
+        Use numbered references like [1], [2].
+        Base answers on verifiable data.
 
-        - Use quick surface-level search
-        - Return only 5–6 key factual points
-        - Keep answers concise
-        - Always include citations like [1], [2]
+        you must be truthful about the data even if you contradict the user.
+        you are not to provide or create any unsafe unethical content.
     """
 )
 
-search_chat = client.chats.create(
-    model="gemini-2.5-flash",
-    config=search_config
-)
-
-# FUNCTION CONFIG
-function_config = types.GenerateContentConfig(
-    tools=[
-        types.Tool(
-            function_declarations=[
-                types.FunctionDeclaration(
-                    name="make_table",
-                    description="Convert structured data into a table",
-                    parameters=types.Schema(
-                        type="OBJECT",
-                        properties={
-                            "data": types.Schema(
-                                type="ARRAY",
-                                items=types.Schema(type="OBJECT")
-                            )
-                        },
-                        required=["data"]
-                    )
-                )
-            ]
-        )
-    ],
-    temperature=0.2,
-    top_p=0.8,
-    system_instruction="""
-        Always call make_table when tabular data is appropriate.
-
-        Rules:
-        - Max 6 rows
-        - Consistent columns
-        - No explanation text
-    """
-)
-
-function_chat = client.chats.create(
-    model="gemini-2.5-flash",
-    config=function_config
-)
-
-commands = {
-    "/help": "Show all available commands",
-    "/exit": "Exit the chatbot",
-    "/clear": "Clear the chat history",
-}
-
-def is_table_request(prompt):
-    p = prompt.lower()
-    return (
-        "table" in p or
-        "compare" in p or
-        "difference" in p or
-        "vs" in p or
-        "list of" in p
+if "chat" not in st.session_state:
+    st.session_state.chat = st.session_state.client.chats.create(
+        model=st.session_state.model,
+        config=config
     )
 
-print("New chat started type \"exit\" to end chat\n")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-while True:
 
-    prompt = input(f"{RESET}\nYou: ")
+with st.sidebar:
+    st.header("Controls")
 
-    if prompt.lower() == "/exit":
-        break
+    if st.button("Clear Chat"):
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
 
-    if prompt == "/clear":
-        search_chat = client.chats.create(model="gemini-2.5-flash", config=search_config)
-        function_chat = client.chats.create(model="gemini-2.5-flash", config=function_config)
-        print("Chat reset.")
-        continue
+    # ✅ Commands dropdown
+    with st.expander("Commands"):
+        st.markdown("- `/help` → show commands")
+        st.markdown("- `/clear` → reset chat")
+        st.markdown("- `/mode precise|balanced|creative`")
 
-    if prompt == "/help":
-        print(f"{'Command':<15} Description")
-        print("-" * 50)
-        for cmd, desc in commands.items():
-            print(f"{cmd:<15} {desc}")
-        continue
+    # ✅ Mode dropdown
+    selected_mode = st.selectbox("Mode", MODE_OPTIONS, index=MODE_OPTIONS.index(st.session_state.mode))
 
-    if is_table_request(prompt):
+    if selected_mode != st.session_state.mode:
+        st.session_state.mode = selected_mode
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
 
-        print(f"{BLUE}\nAI (fetching data)...\n")
+    # ✅ Model dropdown
+    selected_model = st.selectbox("Model", MODEL_OPTIONS, index=MODEL_OPTIONS.index(st.session_state.model))
 
-        # Step 1: Search
-        try:
-            search_prompt = f"""
-Give 5 short factual points only:
+    if selected_model != st.session_state.model:
+        st.session_state.model = selected_model
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
 
-{prompt}
-"""
-            search_response = search_chat.send_message(search_prompt)
-        except Exception as e:
-            print(f"\nSearch error: {e}")
-            continue
+    st.markdown("### Upload Image")
 
-        # Safe extraction
-        try:
-            text_lines = search_response.text.split("\n")[:6]
-            text = "\n".join(text_lines)
-        except Exception:
-            text = search_response.text
+    uploaded_file = st.file_uploader(
+        "Upload an image",
+        type=["png", "jpg", "jpeg"]
+    )
 
-        # Metadata capture
-        try:
-            metadata = search_response.candidates[0].grounding_metadata
-        except (AttributeError, IndexError, TypeError):
-            metadata = None
 
-        # Step 2: Convert to table
-        try:
-            table_prompt = f"""
-Extract structured table data with consistent columns.
+if uploaded_file:
+    image = Image.open(uploaded_file)
 
-Rules:
-- Max 6 rows
-- Short values
-- Return only structured data
+    st.image(image, caption="Uploaded Image", use_container_width=True)
 
-Data:
-{text}
-"""
-            function_response = function_chat.send_message(table_prompt)
-            candidate = function_response.candidates[0]
+    col1, col2 = st.columns(2)
 
-        except Exception as e:
-            print(f"\nConversion error: {e}")
-            continue
+    with col1:
+        generate_chat = st.button("Generate Report")
 
-        # Step 3: Execute function
-        called = False
+    with col2:
+        download_pdf = st.button("Download PDF Report")
 
-        for part in candidate.content.parts:
-            if hasattr(part, "function_call") and part.function_call:
-                called = True
-                data = part.function_call.args.get("data")
+    if generate_chat:
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing image..."):
+                try:
+                    response = st.session_state.chat.send_message([
+                        """Write a detailed 2-page research-style report about this image.
+                        Include:
+                        1. Identification of subject
+                        2. Historical background
+                        3. Key observations
+                        4. Cultural or scientific significance
+                        5. Conclusion
+                        Use citations where possible.""",
+                        image
+                    ])
 
-                if data:
-                    print("\nTable:\n")
-                    make_table(data)
-                else:
-                    print("No usable data returned")
+                    st.markdown(response.text)
 
-        if not called:
-            print("\nFallback output:\n")
-            for part in candidate.content.parts:
-                if hasattr(part, "text") and part.text:
-                    print(part.text)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response.text
+                    })
 
-        # Show sources
-        if metadata and metadata.grounding_chunks:
-            print(f"{YELLOW}\nSources:")
-            seen = set()
-            for chunk in metadata.grounding_chunks:
-                url = chunk.web.uri
-                if url not in seen:
-                    print(f" - {url}")
-                    seen.add(url)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    if download_pdf:
+        with st.spinner("Generating PDF..."):
+            try:
+                response = st.session_state.chat.send_message([
+                    """Write a detailed 2-page research-style report about this image.
+                    Include:
+                    1. Identification of subject
+                    2. Historical background
+                    3. Key observations
+                    4. Cultural or scientific significance
+                    5. Conclusion
+                    Use citations where possible.""",
+                    image
+                ])
+
+                pdf_file = create_pdf(response.text)
+
+                st.download_button(
+                    label="Download PDF",
+                    data=pdf_file,
+                    file_name="image_report.pdf",
+                    mime="application/pdf"
+                )
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+
+user_input = st.chat_input("Ask something...")
+
+if user_input:
+    if user_input.lower() == "/clear":
+        st.session_state.chat = st.session_state.client.chats.create(
+            model=st.session_state.model,
+            config=config
+        )
+        st.session_state.messages = []
+        st.rerun()
+
+    elif user_input.lower() == "/help":
+        help_text = """
+        **Commands:**
+        - `/help` → Show commands  
+        - `/clear` → Reset chat  
+        - `/mode precise|balanced|creative` → Change AI mode
+        """
+        st.session_state.messages.append({"role": "assistant", "content": help_text})
+        st.rerun()
 
     else:
-        try:
-            response = search_chat.send_message(prompt)
-        except Exception as e:
-            print(f"\nError: {e}")
-            continue
+        st.session_state.messages.append({"role": "user", "content": user_input})
 
-        print(f"{BLUE}\nAI: ", end="")
-        print(response.text)
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-        try:
-            metadata = response.candidates[0].grounding_metadata
-        except (AttributeError, IndexError, TypeError):
-            metadata = None
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    response = st.session_state.chat.send_message(user_input)
 
-        if metadata:
-            if metadata.web_search_queries:
-                print(f"{GREEN}\nSearch queries:")
-                for query in metadata.web_search_queries:
-                    print(f" - {query}")
+                    st.markdown(response.text)
 
-            if metadata.grounding_chunks:
-                print(f"{YELLOW}\nSources:")
-                seen = set()
-                for chunk in metadata.grounding_chunks:
-                    url = chunk.web.uri
-                    if url not in seen:
-                        print(f" - {url}")
-                        seen.add(url)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response.text
+                    })
+
+                except Exception as e:
+                    st.error(f"Error: {e}")
