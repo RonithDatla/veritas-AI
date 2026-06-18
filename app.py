@@ -85,13 +85,13 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-    # ✅ Commands dropdown
+    # Commands dropdown
     with st.expander("Commands"):
         st.markdown("- `/help` → show commands")
         st.markdown("- `/clear` → reset chat")
         st.markdown("- `/mode precise|balanced|creative`")
 
-    # ✅ Mode dropdown
+    # Mode dropdown
     selected_mode = st.selectbox("Mode", MODE_OPTIONS, index=MODE_OPTIONS.index(st.session_state.mode))
 
     if selected_mode != st.session_state.mode:
@@ -103,7 +103,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-    # ✅ Model dropdown
+    # Model dropdown
     selected_model = st.selectbox("Model", MODEL_OPTIONS, index=MODEL_OPTIONS.index(st.session_state.model))
 
     if selected_model != st.session_state.model:

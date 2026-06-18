@@ -1,11 +1,15 @@
 import streamlit as st
 from google import genai
-from google.genai import types
 from PIL import Image
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
+from PyPDF2 import PdfReader
+from docx import Document
+import pandas as pd
+import json
 
+# ------------------ PDF CREATION ------------------
 def create_pdf(text):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -13,13 +17,10 @@ def create_pdf(text):
     width, height = letter
     y = height - 40
 
-    lines = text.split("\n")
-
-    for line in lines:
+    for line in text.split("\n"):
         if y < 40:
             c.showPage()
             y = height - 40
-
         c.drawString(40, y, line[:90])
         y -= 15
 
@@ -28,211 +29,169 @@ def create_pdf(text):
     return buffer
 
 
-st.set_page_config(page_title="AI Assistant", layout="wide")
-st.title("AI Assistant")
+# ------------------ FILE READERS ------------------
+def read_pdf(file):
+    reader = PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text
 
-MODES = {
-    "precise": 0.1,
-    "balanced": 0.2,
-    "creative": 0.6
-}
 
-MODE_OPTIONS = ["Precise", "Balanced", "Creative"]
-MODEL_OPTIONS = ["gemini-2.5-flash", "gemini-3.5-flash"]
+def read_docx(file):
+    doc = Document(file)
+    return "\n".join([p.text for p in doc.paragraphs])
 
-if "mode" not in st.session_state:
-    st.session_state.mode = "Balanced"
 
-if "model" not in st.session_state:
-    st.session_state.model = "gemini-3.5-flash"
+def read_txt(file):
+    return file.read().decode("utf-8")
 
+
+def read_csv(file):
+    return pd.read_csv(file).to_string()
+
+
+def read_excel(file):
+    return pd.read_excel(file).to_string()
+
+
+def read_json(file):
+    return json.dumps(json.load(file), indent=2)
+
+
+# ------------------ APP ------------------
+st.set_page_config(page_title="Veritas", layout="wide")
+st.title("Veritas")
+
+# ------------------ INIT CLIENT ------------------
 if "client" not in st.session_state:
     st.session_state.client = genai.Client()
 
-config = types.GenerateContentConfig(
-    tools=[types.Tool(google_search=types.GoogleSearch())],
-    temperature=MODES[st.session_state.mode.lower()],
-    top_p=0.8,
-    system_instruction="""
-        You are a research assistant.
-        Always include citations in your answer.
-        Use numbered references like [1], [2].
-        Base answers on verifiable data.
-
-        you must be truthful about the data even if you contradict the user.
-        you are not to provide or create any unsafe unethical content.
-    """
-)
-
 if "chat" not in st.session_state:
     st.session_state.chat = st.session_state.client.chats.create(
-        model=st.session_state.model,
-        config=config
+        model="gemini-3.5-flash"
     )
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-with st.sidebar:
-    st.header("Controls")
+# ------------------ ATTACHMENT INPUT ------------------
+uploaded_file = st.file_uploader(
+    "Attach a file",
+    type=["png", "jpg", "jpeg", "pdf", "txt", "docx", "csv", "json", "xlsx"]
+)
 
-    if st.button("Clear Chat"):
-        st.session_state.chat = st.session_state.client.chats.create(
-            model=st.session_state.model,
-            config=config
-        )
-        st.session_state.messages = []
-        st.rerun()
-
-    # ✅ Commands dropdown
-    with st.expander("Commands"):
-        st.markdown("- `/help` → show commands")
-        st.markdown("- `/clear` → reset chat")
-        st.markdown("- `/mode precise|balanced|creative`")
-
-    # ✅ Mode dropdown
-    selected_mode = st.selectbox("Mode", MODE_OPTIONS, index=MODE_OPTIONS.index(st.session_state.mode))
-
-    if selected_mode != st.session_state.mode:
-        st.session_state.mode = selected_mode
-        st.session_state.chat = st.session_state.client.chats.create(
-            model=st.session_state.model,
-            config=config
-        )
-        st.session_state.messages = []
-        st.rerun()
-
-    # ✅ Model dropdown
-    selected_model = st.selectbox("Model", MODEL_OPTIONS, index=MODEL_OPTIONS.index(st.session_state.model))
-
-    if selected_model != st.session_state.model:
-        st.session_state.model = selected_model
-        st.session_state.chat = st.session_state.client.chats.create(
-            model=st.session_state.model,
-            config=config
-        )
-        st.session_state.messages = []
-        st.rerun()
-
-    st.markdown("### Upload Image")
-
-    uploaded_file = st.file_uploader(
-        "Upload an image",
-        type=["png", "jpg", "jpeg"]
-    )
-
+image = None
+file_text = None
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
+    file_type = uploaded_file.type
 
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+    if file_type.startswith("image"):
+        image = Image.open(uploaded_file)
+        st.image(image, use_container_width=True)
 
+    elif file_type == "application/pdf":
+        file_text = read_pdf(uploaded_file)
+
+    elif file_type == "text/plain":
+        file_text = read_txt(uploaded_file)
+
+    elif "wordprocessingml" in file_type:
+        file_text = read_docx(uploaded_file)
+
+    elif file_type == "text/csv":
+        file_text = read_csv(uploaded_file)
+
+    elif file_type == "application/json":
+        file_text = read_json(uploaded_file)
+
+    elif "spreadsheetml" in file_type:
+        file_text = read_excel(uploaded_file)
+
+
+# ------------------ IMAGE REPORT OPTIONS ------------------
+if image:
     col1, col2 = st.columns(2)
 
-    with col1:
-        generate_chat = st.button("Generate Report")
+    generate_btn = col1.button("Generate Report")
+    download_btn = col2.button("Download PDF Report")
 
-    with col2:
-        download_pdf = st.button("Download PDF Report")
-
-    if generate_chat:
+    if generate_btn:
         with st.chat_message("assistant"):
-            with st.spinner("Analyzing image..."):
-                try:
-                    response = st.session_state.chat.send_message([
-                        """Write a detailed 2-page research-style report about this image.
-                        Include:
-                        1. Identification of subject
-                        2. Historical background
-                        3. Key observations
-                        4. Cultural or scientific significance
-                        5. Conclusion
-                        Use citations where possible.""",
-                        image
-                    ])
+            response = st.session_state.chat.send_message([
+                "Write a detailed research report about this image.",
+                image
+            ])
+            st.markdown(response.text)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response.text
+            })
 
-                    st.markdown(response.text)
+    if download_btn:
+        response = st.session_state.chat.send_message([
+            "Write a detailed research report about this image.",
+            image
+        ])
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response.text
-                    })
+        pdf_file = create_pdf(response.text)
 
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-    if download_pdf:
-        with st.spinner("Generating PDF..."):
-            try:
-                response = st.session_state.chat.send_message([
-                    """Write a detailed 2-page research-style report about this image.
-                    Include:
-                    1. Identification of subject
-                    2. Historical background
-                    3. Key observations
-                    4. Cultural or scientific significance
-                    5. Conclusion
-                    Use citations where possible.""",
-                    image
-                ])
-
-                pdf_file = create_pdf(response.text)
-
-                st.download_button(
-                    label="Download PDF",
-                    data=pdf_file,
-                    file_name="image_report.pdf",
-                    mime="application/pdf"
-                )
-
-            except Exception as e:
-                st.error(f"Error: {e}")
+        st.download_button(
+            label="Download PDF",
+            data=pdf_file,
+            file_name="report.pdf",
+            mime="application/pdf"
+        )
 
 
+# ------------------ DISPLAY CHAT ------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 
+# ------------------ USER INPUT ------------------
 user_input = st.chat_input("Ask something...")
 
 if user_input:
-    if user_input.lower() == "/clear":
-        st.session_state.chat = st.session_state.client.chats.create(
-            model=st.session_state.model,
-            config=config
-        )
-        st.session_state.messages = []
-        st.rerun()
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
 
-    elif user_input.lower() == "/help":
-        help_text = """
-        **Commands:**
-        - `/help` → Show commands  
-        - `/clear` → Reset chat  
-        - `/mode precise|balanced|creative` → Change AI mode
-        """
-        st.session_state.messages.append({"role": "assistant", "content": help_text})
-        st.rerun()
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    else:
-        st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("assistant"):
+        try:
+            if file_text:
+                prompt = f"""
+                Use this document as reference:
 
-        with st.chat_message("user"):
-            st.markdown(user_input)
+                {file_text[:15000]}
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    response = st.session_state.chat.send_message(user_input)
+                Answer the question:
+                {user_input}
+                """
+                response = st.session_state.chat.send_message(prompt)
 
-                    st.markdown(response.text)
+            elif image:
+                response = st.session_state.chat.send_message([
+                    user_input,
+                    image
+                ])
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": response.text
-                    })
+            else:
+                response = st.session_state.chat.send_message(user_input)
 
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            st.markdown(response.text)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response.text
+            })
+
+        except Exception as e:
+            st.error(f"Error: {e}")
