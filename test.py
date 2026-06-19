@@ -79,6 +79,21 @@ def read_json_cached(file_bytes):
     except:
         return None
 
+# ✅ NEW: Markdown + HTML support
+@st.cache_data
+def read_md_cached(file_bytes):
+    try:
+        return file_bytes.decode("utf-8", errors="ignore")
+    except:
+        return None
+
+@st.cache_data
+def read_html_cached(file_bytes):
+    try:
+        return file_bytes.decode("utf-8", errors="ignore")
+    except:
+        return None
+
 # ------------------ OUTPUT CLEANING ------------------
 def clean_output(text):
     patterns = [
@@ -125,17 +140,16 @@ if "file_text" not in st.session_state:
 if "image" not in st.session_state:
     st.session_state.image = None
 
-if "last_report" not in st.session_state:
-    st.session_state.last_report = None
+if "file_name" not in st.session_state:
+    st.session_state.file_name = None
 
-#DRY CHAT CREATION
+# ------------------ CHAT CREATION ------------------
 def create_chat():
     return st.session_state.client.chats.create(
         model=st.session_state.model,
         config=get_config(st.session_state.mode)
     )
 
-# ------------------ INIT CHAT ------------------
 if "chat" not in st.session_state:
     st.session_state.chat = create_chat()
 
@@ -175,17 +189,29 @@ with st.sidebar:
         st.session_state.chat = create_chat()
         st.rerun()
 
-# ------------------ FILE UPLOAD ------------------
-uploaded_file = st.file_uploader("Attach file")
+# ------------------ CHAT DISPLAY ------------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
+# ------------------ ✅ ATTACHMENT SECTION (NEW LOCATION) ------------------
+st.divider()
+
+uploaded_file = st.file_uploader("📎 Attach file", key="chat_file")
+
+# ✅ Show attached file
 if uploaded_file:
+    st.session_state.file_name = uploaded_file.name
     file_type = uploaded_file.type or ""
     file_bytes = uploaded_file.read()
+
+    st.caption(f"📎 Attached: {uploaded_file.name}")
 
     if file_type.startswith("image"):
         st.session_state.image = Image.open(BytesIO(file_bytes))
         st.session_state.file_text = None
         st.image(st.session_state.image)
+
     else:
         st.session_state.image = None
 
@@ -201,17 +227,16 @@ if uploaded_file:
             text = read_json_cached(file_bytes)
         elif "spreadsheet" in file_type:
             text = read_excel_cached(file_bytes)
+        elif "markdown" in file_type or uploaded_file.name.endswith(".md"):
+            text = read_md_cached(file_bytes)
+        elif "html" in file_type or uploaded_file.name.endswith(".html"):
+            text = read_html_cached(file_bytes)
         else:
             text = None
 
         st.session_state.file_text = text
 
-# ------------------ CHAT DISPLAY ------------------
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# ------------------ CHAT ------------------
+# ------------------ CHAT INPUT ------------------
 user_input = st.chat_input("Ask something...")
 
 if user_input:
@@ -235,7 +260,7 @@ if user_input:
             else:
                 response = st.session_state.chat.send_message(user_input)
 
-            # ✅ SAFE RESPONSE EXTRACTION (CRITICAL FIX)
+            # ✅ SAFE RESPONSE EXTRACTION
             output_text = ""
 
             if hasattr(response, "text") and response.text:
@@ -248,7 +273,6 @@ if user_input:
             else:
                 output_text = "⚠️ No response from model."
 
-            # ✅ CLEAN + FORMAT
             clean_text = clean_output(output_text)
             formatted_text = make_links_clickable(clean_text)
 
