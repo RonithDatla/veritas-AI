@@ -12,7 +12,22 @@ from file_utils import *
 from formatting import clean_output, make_links_clickable
 
 # ------------------ CONSTANTS ------------------
-IMAGE_PROMPT = "Write a detailed research report 2 pages long about this image."
+IMAGE_PROMPT = """
+    You are an expert in visual analysis and research synthesis.
+
+    Analyze this image and produce a structured research report:
+
+    1. Title
+    2. Visual Description (objective)
+    3. Key Elements and Composition
+    4. Interpretation and Meaning
+    5. Contextual Significance
+    6. Insights and Implications
+    7. Conclusion
+
+    Be precise, analytical, and avoid generic descriptions.
+    """
+
 
 # ------------------ PDF GENERATION ------------------
 def create_pdf(text):
@@ -128,10 +143,28 @@ with st.sidebar:
 
             elif st.session_state.file_text:
                 prompt = f"""
-Analyze the following content and generate a structured research report with insights, summary, and conclusions:
+                    You are an expert research analyst.
 
-{st.session_state.file_text[:15000]}
-                """
+                    Generate a professional, structured research report using the following format:
+
+                    1. Title
+                    2. Abstract (2–4 sentences summarizing the content)
+                    3. Key Insights (bullet points)
+                    4. Detailed Analysis (well-structured paragraphs with headings)
+                    5. Practical Implications or Takeaways
+                    6. Conclusion
+                    7. Sources (if applicable)
+
+                    Requirements:
+                    - Be specific and analytical, not generic
+                    - Avoid filler language
+                    - Explain underlying meaning, patterns, or implications
+                    - Use clear headings and formatting
+                    - If content is unclear, infer intelligently
+
+                    Content:
+                    {st.session_state.file_text[:15000]}
+                    """
                 response = st.session_state.chat.send_message(prompt)
 
             else:
