@@ -5,31 +5,32 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
 import os
-import re
 
 from config import get_config, MODE_MAP, MODEL_OPTIONS
 from file_utils import *
 from formatting import clean_output, make_links_clickable
 
 # ------------------ CONSTANTS ------------------
-IMAGE_PROMPT = """
-    You are an expert in visual analysis and research synthesis.
+REPORT_PROMPT = """
+You are an expert research analyst.
 
-    Analyze this image and produce a structured research report:
+Generate a high-quality structured report using the following format:
 
-    1. Title
-    2. Visual Description (objective)
-    3. Key Elements and Composition
-    4. Interpretation and Meaning
-    5. Contextual Significance
-    6. Insights and Implications
-    7. Conclusion
+1. Title
+2. Abstract
+3. Key Insights (bullet points)
+4. Detailed Analysis (clear sections)
+5. Key Takeaways
+6. Conclusion
 
-    Be precise, analytical, and avoid generic descriptions.
-    """
+Instructions:
+- Use any provided files as primary reference
+- Carefully analyze ALL provided content before writing
+- Combine user instructions with file content
+- Be precise, analytical, and avoid fluff
+"""
 
-
-# ------------------ PDF GENERATION ------------------
+# ------------------ PDF ------------------
 def create_pdf(text):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -72,19 +73,10 @@ if "model" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "file_text" not in st.session_state:
-    st.session_state.file_text = None
+if "report_output" not in st.session_state:
+    st.session_state.report_output = None
 
-if "image" not in st.session_state:
-    st.session_state.image = None
-
-if "file_name" not in st.session_state:
-    st.session_state.file_name = None
-
-if "last_report" not in st.session_state:
-    st.session_state.last_report = None
-
-# ------------------ CHAT CREATION ------------------
+# ------------------ CHAT ------------------
 def create_chat():
     return st.session_state.client.chats.create(
         model=st.session_state.model,
@@ -130,166 +122,140 @@ with st.sidebar:
         st.session_state.chat = create_chat()
         st.rerun()
 
-    st.divider()
+# ------------------ MAIN LAYOUT ------------------
+col_main, col_right = st.columns([3, 1])
 
-    # ------------------ GENERATE REPORT ------------------
-    if st.button("Generate Report"):
-        with st.spinner("Generating report..."):
+# ------------------ RIGHT PANEL (REPORT) ------------------
+with col_right:
+    with st.expander("Generate Report", expanded=False):
 
-            if st.session_state.image:
-                response = st.session_state.chat.send_message(
-                    [IMAGE_PROMPT, st.session_state.image]
-                )
-
-            elif st.session_state.file_text:
-                prompt = f"""
-                    You are an expert research analyst.
-
-                    Generate a professional, structured research report using the following format:
-
-                    1. Title
-                    2. Abstract (2–4 sentences summarizing the content)
-                    3. Key Insights (bullet points)
-                    4. Detailed Analysis (well-structured paragraphs with headings)
-                    5. Practical Implications or Takeaways
-                    6. Conclusion
-                    7. Sources (if applicable)
-
-                    Requirements:
-                    - Be specific and analytical, not generic
-                    - Avoid filler language
-                    - Explain underlying meaning, patterns, or implications
-                    - Use clear headings and formatting
-                    - If content is unclear, infer intelligently
-
-                    Content:
-                    {st.session_state.file_text[:15000]}
-                    """
-                response = st.session_state.chat.send_message(prompt)
-
-            else:
-                st.warning("Please attach a file first.")
-                st.stop()
-
-            if hasattr(response, "text") and response.text:
-                output_text = response.text
-            elif hasattr(response, "candidates"):
-                try:
-                    output_text = response.candidates[0].content.parts[0].text
-                except:
-                    output_text = "Could not generate report."
-            else:
-                output_text = "No response from model."
-
-            clean_text = clean_output(output_text)
-            formatted_text = make_links_clickable(clean_text)
-
-            st.session_state.last_report = formatted_text
-
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": formatted_text
-            })
-
-            st.success("Report generated.")
-
-    # ------------------ DOWNLOAD REPORT ------------------
-    if st.session_state.last_report:
-        pdf = create_pdf(st.session_state.last_report)
-
-        st.download_button(
-            "Download Report",
-            pdf,
-            "report.pdf",
-            "application/pdf"
+        report_instruction = st.text_area(
+            "Instructions",
+            placeholder="e.g. focus on trends, summarize insights...",
+            key="report_text_input"
         )
 
-# ------------------ CHAT DISPLAY ------------------
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        report_file = st.file_uploader(
+            "Upload file",
+            key="report_file_upload"
+        )
 
-# ------------------ ATTACHMENT ------------------
-st.divider()
+        report_image = None
+        report_text = None
 
-uploaded_file = st.file_uploader("Attach file", key="chat_file")
+        if report_file:
+            file_bytes = report_file.read()
+            file_type = report_file.type or ""
 
-if uploaded_file:
-    st.session_state.file_name = uploaded_file.name
-    file_type = uploaded_file.type or ""
-    file_bytes = uploaded_file.read()
-
-    st.caption(f"Attached: {uploaded_file.name}")
-
-    if file_type.startswith("image"):
-        st.session_state.image = Image.open(BytesIO(file_bytes))
-        st.session_state.file_text = None
-        st.image(st.session_state.image)
-
-    else:
-        st.session_state.image = None
-
-        if "pdf" in file_type:
-            text = read_pdf_cached(file_bytes)
-        elif "word" in file_type:
-            text = read_docx_cached(file_bytes)
-        elif file_type == "text/plain":
-            text = read_txt_cached(file_bytes)
-        elif "csv" in file_type:
-            text = read_csv_cached(file_bytes)
-        elif "json" in file_type:
-            text = read_json_cached(file_bytes)
-        elif "spreadsheet" in file_type:
-            text = read_excel_cached(file_bytes)
-        elif "markdown" in file_type or uploaded_file.name.endswith(".md"):
-            text = read_md_cached(file_bytes)
-        elif "html" in file_type or uploaded_file.name.endswith(".html"):
-            text = read_html_cached(file_bytes)
-        else:
-            text = None
-
-        st.session_state.file_text = text
-
-# ------------------ CHAT INPUT ------------------
-user_input = st.chat_input("Ask something...")
-
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-
-            if st.session_state.file_text:
-                prompt = f"{st.session_state.file_text[:15000]}\n\n{user_input}"
-                response = st.session_state.chat.send_message(prompt)
-
-            elif st.session_state.image:
-                response = st.session_state.chat.send_message(
-                    [user_input, st.session_state.image]
-                )
-
+            if file_type.startswith("image"):
+                report_image = Image.open(BytesIO(file_bytes))
+                st.image(report_image, use_column_width=True)
             else:
+                if "pdf" in file_type:
+                    report_text = read_pdf_cached(file_bytes)
+                elif "word" in file_type:
+                    report_text = read_docx_cached(file_bytes)
+                elif file_type == "text/plain":
+                    report_text = read_txt_cached(file_bytes)
+                elif "csv" in file_type:
+                    report_text = read_csv_cached(file_bytes)
+                elif "json" in file_type:
+                    report_text = read_json_cached(file_bytes)
+                elif "spreadsheet" in file_type:
+                    report_text = read_excel_cached(file_bytes)
+                elif report_file.name.endswith(".md"):
+                    report_text = read_md_cached(file_bytes)
+                elif report_file.name.endswith(".html"):
+                    report_text = read_html_cached(file_bytes)
+
+        if st.button("Generate Report", key="generate_report_btn"):
+
+            if not report_file and not report_instruction:
+                st.warning("Provide a file or instructions.")
+                st.stop()
+
+            with st.spinner("Generating report..."):
+
+                content_input = REPORT_PROMPT + "\n\n"
+
+                if report_instruction:
+                    content_input += f"User Instruction:\n{report_instruction}\n\n"
+
+                if report_text:
+                    content_input += f"Content:\n{report_text[:15000]}"
+
+                if report_image:
+                    response = st.session_state.chat.send_message(
+                        [content_input, report_image]
+                    )
+                else:
+                    response = st.session_state.chat.send_message(content_input)
+
+                if hasattr(response, "text") and response.text:
+                    output_text = response.text
+                else:
+                    try:
+                        output_text = response.candidates[0].content.parts[0].text
+                    except:
+                        output_text = "Report generation failed."
+
+                clean_text = clean_output(output_text)
+                formatted_text = make_links_clickable(clean_text)
+
+                st.session_state.report_output = formatted_text
+
+        if st.session_state.report_output:
+            st.markdown("### Preview")
+
+            preview = st.session_state.report_output[:1000]
+            st.markdown(preview + "...")
+
+            st.info("Download full report below")
+
+            pdf = create_pdf(st.session_state.report_output)
+
+            st.download_button(
+                "Download",
+                pdf,
+                "report.pdf",
+                "application/pdf",
+                key="download_report_btn"
+            )
+
+# ------------------ LEFT PANEL (CHAT) ------------------
+with col_main:
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input = st.chat_input("Ask something...")
+
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+
                 response = st.session_state.chat.send_message(user_input)
 
-            if hasattr(response, "text") and response.text:
-                output_text = response.text
-            elif hasattr(response, "candidates"):
-                try:
-                    output_text = response.candidates[0].content.parts[0].text
-                except:
-                    output_text = "Model returned no readable output."
-            else:
-                output_text = "No response from model."
+                if hasattr(response, "text") and response.text:
+                    output_text = response.text
+                else:
+                    try:
+                        output_text = response.candidates[0].content.parts[0].text
+                    except:
+                        output_text = "No response from model."
 
-            clean_text = clean_output(output_text)
-            formatted_text = make_links_clickable(clean_text)
+                clean_text = clean_output(output_text)
+                formatted_text = make_links_clickable(clean_text)
 
-            st.markdown(formatted_text)
+                st.markdown(formatted_text)
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": formatted_text
-            })
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": formatted_text
+                })
