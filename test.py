@@ -225,3 +225,36 @@ if user_input:
 
             if st.session_state.file_text:
                 prompt = f"{st.session_state.file_text[:15000]}\n\n{user_input}"
+                response = st.session_state.chat.send_message(prompt)
+
+            elif st.session_state.image:
+                response = st.session_state.chat.send_message(
+                    [user_input, st.session_state.image]
+                )
+
+            else:
+                response = st.session_state.chat.send_message(user_input)
+
+            # ✅ SAFE RESPONSE EXTRACTION (CRITICAL FIX)
+            output_text = ""
+
+            if hasattr(response, "text") and response.text:
+                output_text = response.text
+            elif hasattr(response, "candidates"):
+                try:
+                    output_text = response.candidates[0].content.parts[0].text
+                except:
+                    output_text = "⚠️ Model returned no readable output."
+            else:
+                output_text = "⚠️ No response from model."
+
+            # ✅ CLEAN + FORMAT
+            clean_text = clean_output(output_text)
+            formatted_text = make_links_clickable(clean_text)
+
+            st.markdown(formatted_text)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": formatted_text
+            })
