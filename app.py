@@ -5,12 +5,12 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
 import os
-
 from config import get_config, MODE_MAP, MODEL_OPTIONS
 from file_utils import *
 from formatting import clean_output, make_links_clickable
 
 # ------------------ CONSTANTS ------------------
+
 REPORT_PROMPT = """
 You are an expert research analyst.
 
@@ -30,7 +30,19 @@ Instructions:
 - Be precise, analytical, and avoid fluff
 """
 
+POLISH_PROMPT = """
+You are an expert academic editor.
+
+Revise the provided document:
+- Use British English spelling
+- Improve grammar and punctuation
+- Ensure formal academic tone
+- Remove informal language
+- Preserve original meaning
+"""
+
 # ------------------ PDF ------------------
+
 def create_pdf(text):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -51,19 +63,21 @@ def create_pdf(text):
     return buffer
 
 # ------------------ APP ------------------
+
 st.set_page_config(page_title="Veritas AI", layout="wide")
-st.title("Veritas AI")
+st.title("🔍 Veritas AI")
 
 # ------------------ API ------------------
+
 if "client" not in st.session_state:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         st.error("Missing API key.")
         st.stop()
-
     st.session_state.client = genai.Client(api_key=api_key)
 
 # ------------------ STATE ------------------
+
 if "mode" not in st.session_state:
     st.session_state.mode = "balanced"
 
@@ -76,7 +90,11 @@ if "messages" not in st.session_state:
 if "report_output" not in st.session_state:
     st.session_state.report_output = None
 
+if "polish_output" not in st.session_state:
+    st.session_state.polish_output = None
+
 # ------------------ CHAT ------------------
+
 def create_chat():
     return st.session_state.client.chats.create(
         model=st.session_state.model,
@@ -86,11 +104,12 @@ def create_chat():
 if "chat" not in st.session_state:
     st.session_state.chat = create_chat()
 
-# ------------------ SIDEBAR ------------------
-with st.sidebar:
-    st.header("Controls")
+# ------------------ LEFT SIDEBAR ------------------
 
-    if st.button("Clear Chat"):
+with st.sidebar:
+    st.header("⚙️ Controls")
+
+    if st.button("🧹 Clear Chat"):
         st.session_state.messages = []
         st.session_state.chat = create_chat()
         st.rerun()
@@ -123,106 +142,113 @@ with st.sidebar:
         st.rerun()
 
 # ------------------ MAIN LAYOUT ------------------
-col_main, col_right = st.columns([3, 1])
 
-# ------------------ RIGHT PANEL (REPORT) ------------------
+col_main, col_right = st.columns([4, 1.2], gap="large")
+
+# ------------------ RIGHT PANEL ------------------
+
 with col_right:
-    with st.expander("Generate Report", expanded=False):
+
+    st.markdown("## 🧰 Tools")
+
+    # ---------- Generate Report ----------
+    with st.expander("📄 Generate Report"):
 
         report_instruction = st.text_area(
             "Instructions",
-            placeholder="e.g. focus on trends, summarize insights...",
-            key="report_text_input"
+            key="report_input"
         )
 
-        report_file = st.file_uploader(
-            "Upload file",
-            key="report_file_upload"
-        )
+        report_file = st.file_uploader("Upload file", key="report_upload")
 
-        report_image = None
         report_text = None
+        report_image = None
 
         if report_file:
-            file_bytes = report_file.read()
+            file_bytes = report_file.getvalue()
             file_type = report_file.type or ""
 
             if file_type.startswith("image"):
                 report_image = Image.open(BytesIO(file_bytes))
-                st.image(report_image, use_column_width=True)
+                st.image(report_image)
             else:
                 if "pdf" in file_type:
                     report_text = read_pdf_cached(file_bytes)
                 elif "word" in file_type:
                     report_text = read_docx_cached(file_bytes)
-                elif file_type == "text/plain":
+                else:
                     report_text = read_txt_cached(file_bytes)
-                elif "csv" in file_type:
-                    report_text = read_csv_cached(file_bytes)
-                elif "json" in file_type:
-                    report_text = read_json_cached(file_bytes)
-                elif "spreadsheet" in file_type:
-                    report_text = read_excel_cached(file_bytes)
-                elif report_file.name.endswith(".md"):
-                    report_text = read_md_cached(file_bytes)
-                elif report_file.name.endswith(".html"):
-                    report_text = read_html_cached(file_bytes)
 
-        if st.button("Generate Report", key="generate_report_btn"):
-
-            if not report_file and not report_instruction:
-                st.warning("Provide a file or instructions.")
+        if st.button("Generate", key="gen_btn"):
+            if not report_instruction and not report_file:
+                st.warning("Provide input.")
                 st.stop()
 
-            with st.spinner("Generating report..."):
+            content = REPORT_PROMPT + "\n\n"
 
-                content_input = REPORT_PROMPT + "\n\n"
+            if report_instruction:
+                content += report_instruction + "\n\n"
 
-                if report_instruction:
-                    content_input += f"User Instruction:\n{report_instruction}\n\n"
+            if report_text:
+                content += report_text[:15000]
 
-                if report_text:
-                    content_input += f"Content:\n{report_text[:15000]}"
+            if report_image:
+                response = st.session_state.chat.send_message([content, report_image])
+            else:
+                response = st.session_state.chat.send_message(content)
 
-                if report_image:
-                    response = st.session_state.chat.send_message(
-                        [content_input, report_image]
-                    )
-                else:
-                    response = st.session_state.chat.send_message(content_input)
+            try:
+                output_text = response.text
+            except:
+                output_text = response.candidates[0].content.parts[0].text
 
-                if hasattr(response, "text") and response.text:
-                    output_text = response.text
-                else:
-                    try:
-                        output_text = response.candidates[0].content.parts[0].text
-                    except:
-                        output_text = "Report generation failed."
-
-                clean_text = clean_output(output_text)
-                formatted_text = make_links_clickable(clean_text)
-
-                st.session_state.report_output = formatted_text
+            st.session_state.report_output = clean_output(output_text)
 
         if st.session_state.report_output:
-            st.markdown("### Preview")
-
-            preview = st.session_state.report_output[:1000]
-            st.markdown(preview + "...")
-
-            st.info("Download full report below")
-
             pdf = create_pdf(st.session_state.report_output)
+            st.download_button("⬇️ Download Report", pdf, "report.pdf")
 
-            st.download_button(
-                "Download",
-                pdf,
-                "report.pdf",
-                "application/pdf",
-                key="download_report_btn"
-            )
+    # ---------- Polish Document ----------
+    with st.expander("✍️ Polish Academic Document"):
 
-# ------------------ LEFT PANEL (CHAT) ------------------
+        polish_file = st.file_uploader("Upload document", key="polish_upload")
+
+        polish_text = None
+
+        if polish_file:
+            file_bytes = polish_file.getvalue()
+            file_type = polish_file.type or ""
+
+            if "pdf" in file_type:
+                polish_text = read_pdf_cached(file_bytes)
+            elif "word" in file_type:
+                polish_text = read_docx_cached(file_bytes)
+            else:
+                polish_text = read_txt_cached(file_bytes)
+
+        if st.button("Polish", key="polish_btn"):
+
+            if not polish_file:
+                st.warning("Upload a document.")
+                st.stop()
+
+            content = POLISH_PROMPT + "\n\n" + polish_text[:15000]
+
+            response = st.session_state.chat.send_message(content)
+
+            try:
+                output_text = response.text
+            except:
+                output_text = response.candidates[0].content.parts[0].text
+
+            st.session_state.polish_output = clean_output(output_text)
+
+        if st.session_state.polish_output:
+            pdf = create_pdf(st.session_state.polish_output)
+            st.download_button("⬇️ Download Polished", pdf, "polished.pdf")
+
+# ------------------ CHAT ------------------
+
 with col_main:
 
     for msg in st.session_state.messages:
@@ -232,30 +258,18 @@ with col_main:
     user_input = st.chat_input("Ask something...")
 
     if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        response = st.session_state.chat.send_message(user_input)
 
-        with st.chat_message("user"):
-            st.markdown(user_input)
+        try:
+            output_text = response.text
+        except:
+            output_text = response.candidates[0].content.parts[0].text
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+        clean_text = clean_output(output_text)
 
-                response = st.session_state.chat.send_message(user_input)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": clean_text
+        })
 
-                if hasattr(response, "text") and response.text:
-                    output_text = response.text
-                else:
-                    try:
-                        output_text = response.candidates[0].content.parts[0].text
-                    except:
-                        output_text = "No response from model."
-
-                clean_text = clean_output(output_text)
-                formatted_text = make_links_clickable(clean_text)
-
-                st.markdown(formatted_text)
-
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": formatted_text
-                })
+        st.rerun()

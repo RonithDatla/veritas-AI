@@ -5,6 +5,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
 import os
+from youtube_transcript_api import YouTubeTranscriptApi
+
 from config import get_config, MODE_MAP, MODEL_OPTIONS
 from file_utils import *
 from formatting import clean_output, make_links_clickable
@@ -14,33 +16,77 @@ from formatting import clean_output, make_links_clickable
 REPORT_PROMPT = """
 You are an expert research analyst.
 
-Generate a high-quality structured report using the following format:
+Generate a high-quality structured report using:
 
 1. Title
 2. Abstract
-3. Key Insights (bullet points)
-4. Detailed Analysis (clear sections)
+3. Key Insights
+4. Detailed Analysis
 5. Key Takeaways
 6. Conclusion
 
-Instructions:
-- Use any provided files as primary reference
-- Carefully analyze ALL provided content before writing
-- Combine user instructions with file content
-- Be precise, analytical, and avoid fluff
+Be precise, structured, and analytical.
 """
 
 POLISH_PROMPT = """
-You are an expert academic editor.
+You are an academic editor.
 
-Revise the provided document:
-- Use British English spelling
-- Improve grammar and punctuation
-- Ensure formal academic tone
-- Remove informal language
-- Preserve original meaning
+Rewrite using:
+- British English
+- formal academic tone
+- improved grammar & punctuation
+- preserve meaning
 """
 
+# ------------------ YOUTUBE ------------------
+def get_youtube_transcript(url):
+    try:
+        import re
+
+        match = re.search(r"(v=|youtu\.be/)([^&?/]+)", url)
+        if not match:
+            print("Invalid URL")
+            return None
+
+        video_id = match.group(2)
+
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        print("Available transcripts:", transcript_list)
+
+        # ✅ Try ALL transcripts one by one
+        for transcript in transcript_list:
+            try:
+                print("Trying:", transcript)
+                result = transcript.fetch()
+
+                text = " ".join([t["text"] for t in result])
+                if text.strip():
+                    return text
+
+            except Exception as e:
+                print("Fetch failed:", e)
+
+        # ✅ Try translation fallback
+        for transcript in transcript_list:
+            try:
+                print("Trying translate:", transcript)
+                result = transcript.translate("en").fetch()
+
+                text = " ".join([t["text"] for t in result])
+                if text.strip():
+                    return text
+
+            except Exception as e:
+                print("Translate failed:", e)
+
+        print("All transcript attempts failed")
+        return None
+
+    except Exception as e:
+        print("Transcript error:", e)
+        return None
+    
 # ------------------ PDF ------------------
 
 def create_pdf(text):
@@ -78,20 +124,16 @@ if "client" not in st.session_state:
 
 # ------------------ STATE ------------------
 
-if "mode" not in st.session_state:
-    st.session_state.mode = "balanced"
-
-if "model" not in st.session_state:
-    st.session_state.model = "gemini-3.5-flash"
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "report_output" not in st.session_state:
-    st.session_state.report_output = None
-
-if "polish_output" not in st.session_state:
-    st.session_state.polish_output = None
+for key, default in {
+    "mode": "balanced",
+    "model": MODEL_OPTIONS[0],
+    "messages": [],
+    "report_output": None,
+    "polish_output": None,
+    "yt_output": None,
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # ------------------ CHAT ------------------
 
@@ -104,7 +146,7 @@ def create_chat():
 if "chat" not in st.session_state:
     st.session_state.chat = create_chat()
 
-# ------------------ LEFT SIDEBAR ------------------
+# ------------------ SIDEBAR ------------------
 
 with st.sidebar:
     st.header("⚙️ Controls")
@@ -115,7 +157,7 @@ with st.sidebar:
         st.rerun()
 
     reverse_map = {v: k for k, v in MODE_MAP.items()}
-    current_display = reverse_map[st.session_state.mode]
+    current_display = reverse_map.get(st.session_state.mode, list(MODE_MAP.keys())[0])
 
     selected_display = st.selectbox(
         "Mode",
@@ -141,25 +183,20 @@ with st.sidebar:
         st.session_state.chat = create_chat()
         st.rerun()
 
-# ------------------ MAIN LAYOUT ------------------
+# ------------------ LAYOUT ------------------
 
-col_main, col_right = st.columns([4, 1.2], gap="large")
+col_main, col_right = st.columns([4, 1.2])
 
 # ------------------ RIGHT PANEL ------------------
 
 with col_right:
-
     st.markdown("## 🧰 Tools")
 
-    # ---------- Generate Report ----------
+    # ---------- REPORT ----------
     with st.expander("📄 Generate Report"):
 
-        report_instruction = st.text_area(
-            "Instructions",
-            key="report_input"
-        )
-
-        report_file = st.file_uploader("Upload file", key="report_upload")
+        report_instruction = st.text_area("Instructions")
+        report_file = st.file_uploader("Upload file")
 
         report_text = None
         report_image = None
@@ -179,7 +216,7 @@ with col_right:
                 else:
                     report_text = read_txt_cached(file_bytes)
 
-        if st.button("Generate", key="gen_btn"):
+        if st.button("Generate Report", key="report_btn"):
             if not report_instruction and not report_file:
                 st.warning("Provide input.")
                 st.stop()
@@ -188,7 +225,6 @@ with col_right:
 
             if report_instruction:
                 content += report_instruction + "\n\n"
-
             if report_text:
                 content += report_text[:15000]
 
@@ -197,34 +233,21 @@ with col_right:
             else:
                 response = st.session_state.chat.send_message(content)
 
-            try:
-                output_text = response.text
-            except:
-                output_text = response.candidates[0].content.parts[0].text
-
-            st.session_state.report_output = clean_output(output_text)
+            st.session_state.report_output = clean_output(
+                getattr(response, "text", response.candidates[0].content.parts[0].text)
+            )
 
         if st.session_state.report_output:
-            pdf = create_pdf(st.session_state.report_output)
-            st.download_button("⬇️ Download Report", pdf, "report.pdf")
+            st.download_button(
+                "⬇️ Download Report",
+                create_pdf(st.session_state.report_output),
+                "report.pdf"
+            )
 
-    # ---------- Polish Document ----------
+    # ---------- POLISH ----------
     with st.expander("✍️ Polish Academic Document"):
 
         polish_file = st.file_uploader("Upload document", key="polish_upload")
-
-        polish_text = None
-
-        if polish_file:
-            file_bytes = polish_file.getvalue()
-            file_type = polish_file.type or ""
-
-            if "pdf" in file_type:
-                polish_text = read_pdf_cached(file_bytes)
-            elif "word" in file_type:
-                polish_text = read_docx_cached(file_bytes)
-            else:
-                polish_text = read_txt_cached(file_bytes)
 
         if st.button("Polish", key="polish_btn"):
 
@@ -232,20 +255,56 @@ with col_right:
                 st.warning("Upload a document.")
                 st.stop()
 
-            content = POLISH_PROMPT + "\n\n" + polish_text[:15000]
+            text = read_txt_cached(polish_file.getvalue())
 
-            response = st.session_state.chat.send_message(content)
+            response = st.session_state.chat.send_message(
+                POLISH_PROMPT + "\n\n" + text[:15000]
+            )
 
-            try:
-                output_text = response.text
-            except:
-                output_text = response.candidates[0].content.parts[0].text
-
-            st.session_state.polish_output = clean_output(output_text)
+            st.session_state.polish_output = clean_output(
+                getattr(response, "text", response.candidates[0].content.parts[0].text)
+            )
 
         if st.session_state.polish_output:
-            pdf = create_pdf(st.session_state.polish_output)
-            st.download_button("⬇️ Download Polished", pdf, "polished.pdf")
+            st.download_button(
+                "⬇️ Download Polished",
+                create_pdf(st.session_state.polish_output),
+                "polished.pdf"
+            )
+
+    # ---------- YOUTUBE ----------
+    with st.expander("🎥 Summarize YouTube Video"):
+
+        yt_url = st.text_input("YouTube URL")
+
+        if st.button("Summarize Video", key="yt_btn"):
+
+            if not yt_url:
+                st.warning("Provide a link.")
+                st.stop()
+
+            transcript = get_youtube_transcript(yt_url)
+
+            if not transcript:
+                st.error("No transcript available.")
+            else:
+                response = st.session_state.chat.send_message(
+                    REPORT_PROMPT + "\n\n" + transcript[:15000]
+                )
+
+                try:
+                    output_text = response.text
+                except:
+                    output_text = response.candidates[0].content.parts[0].text
+
+                st.session_state.yt_output = clean_output(output_text)
+
+        if st.session_state.yt_output:
+            st.download_button(
+                "⬇️ Download Summary",
+                create_pdf(st.session_state.yt_output),
+                "youtube_summary.pdf"
+            )
 
 # ------------------ CHAT ------------------
 
@@ -260,10 +319,11 @@ with col_main:
     if user_input:
         response = st.session_state.chat.send_message(user_input)
 
-        try:
-            output_text = response.text
-        except:
-            output_text = response.candidates[0].content.parts[0].text
+        output_text = getattr(
+            response,
+            "text",
+            response.candidates[0].content.parts[0].text
+        )
 
         clean_text = clean_output(output_text)
 
