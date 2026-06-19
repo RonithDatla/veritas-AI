@@ -4,18 +4,17 @@ from PIL import Image
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
-from PyPDF2 import PdfReader
-from docx import Document
-import pandas as pd
-import json
 import os
 import re
+
 from config import get_config, MODE_MAP, MODEL_OPTIONS
+from file_utils import *
+from formatting import clean_output, make_links_clickable
 
 # ------------------ CONSTANTS ------------------
 IMAGE_PROMPT = "Write a detailed research report 2 pages long about this image."
 
-# ------------------ PDF CREATION ------------------
+# ------------------ PDF GENERATION ------------------
 def create_pdf(text):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -34,82 +33,6 @@ def create_pdf(text):
     c.save()
     buffer.seek(0)
     return buffer
-
-# ------------------ FILE READERS ------------------
-@st.cache_data
-def read_pdf_cached(file_bytes):
-    try:
-        reader = PdfReader(BytesIO(file_bytes))
-        return "".join([p.extract_text() or "" for p in reader.pages])
-    except:
-        return None
-
-@st.cache_data
-def read_docx_cached(file_bytes):
-    try:
-        return "\n".join([p.text for p in Document(BytesIO(file_bytes)).paragraphs])
-    except:
-        return None
-
-@st.cache_data
-def read_txt_cached(file_bytes):
-    try:
-        return file_bytes.decode("utf-8", errors="ignore")
-    except:
-        return None
-
-@st.cache_data
-def read_csv_cached(file_bytes):
-    try:
-        return pd.read_csv(BytesIO(file_bytes)).to_string()
-    except:
-        return None
-
-@st.cache_data
-def read_excel_cached(file_bytes):
-    try:
-        return pd.read_excel(BytesIO(file_bytes)).to_string()
-    except:
-        return None
-
-@st.cache_data
-def read_json_cached(file_bytes):
-    try:
-        return json.dumps(json.loads(file_bytes.decode("utf-8")), indent=2)
-    except:
-        return None
-
-# ✅ NEW: Markdown + HTML support
-@st.cache_data
-def read_md_cached(file_bytes):
-    try:
-        return file_bytes.decode("utf-8", errors="ignore")
-    except:
-        return None
-
-@st.cache_data
-def read_html_cached(file_bytes):
-    try:
-        return file_bytes.decode("utf-8", errors="ignore")
-    except:
-        return None
-
-# ------------------ OUTPUT CLEANING ------------------
-def clean_output(text):
-    patterns = [
-        "Search Queries:",
-        "Metadata Search Queries:",
-        "Search queries:",
-        "Metadata:"
-    ]
-    for p in patterns:
-        if p in text:
-            text = text.split(p)[0]
-    return text.strip()
-
-def make_links_clickable(text):
-    url_pattern = r'(https?://[^\s]+)'
-    return re.sub(url_pattern, r'\1', text)
 
 # ------------------ APP ------------------
 st.set_page_config(page_title="Veritas AI", layout="wide")
@@ -143,6 +66,9 @@ if "image" not in st.session_state:
 if "file_name" not in st.session_state:
     st.session_state.file_name = None
 
+if "last_report" not in st.session_state:
+    st.session_state.last_report = None
+
 # ------------------ CHAT CREATION ------------------
 def create_chat():
     return st.session_state.client.chats.create(
@@ -155,9 +81,9 @@ if "chat" not in st.session_state:
 
 # ------------------ SIDEBAR ------------------
 with st.sidebar:
-    st.header("⚙️ Controls")
+    st.header("Controls")
 
-    if st.button("🧹 Clear Chat"):
+    if st.button("Clear Chat"):
         st.session_state.messages = []
         st.session_state.chat = create_chat()
         st.rerun()
@@ -189,23 +115,78 @@ with st.sidebar:
         st.session_state.chat = create_chat()
         st.rerun()
 
+    st.divider()
+
+    # ------------------ GENERATE REPORT ------------------
+    if st.button("Generate Report"):
+        with st.spinner("Generating report..."):
+
+            if st.session_state.image:
+                response = st.session_state.chat.send_message(
+                    [IMAGE_PROMPT, st.session_state.image]
+                )
+
+            elif st.session_state.file_text:
+                prompt = f"""
+Analyze the following content and generate a structured research report with insights, summary, and conclusions:
+
+{st.session_state.file_text[:15000]}
+                """
+                response = st.session_state.chat.send_message(prompt)
+
+            else:
+                st.warning("Please attach a file first.")
+                st.stop()
+
+            if hasattr(response, "text") and response.text:
+                output_text = response.text
+            elif hasattr(response, "candidates"):
+                try:
+                    output_text = response.candidates[0].content.parts[0].text
+                except:
+                    output_text = "Could not generate report."
+            else:
+                output_text = "No response from model."
+
+            clean_text = clean_output(output_text)
+            formatted_text = make_links_clickable(clean_text)
+
+            st.session_state.last_report = formatted_text
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": formatted_text
+            })
+
+            st.success("Report generated.")
+
+    # ------------------ DOWNLOAD REPORT ------------------
+    if st.session_state.last_report:
+        pdf = create_pdf(st.session_state.last_report)
+
+        st.download_button(
+            "Download Report",
+            pdf,
+            "report.pdf",
+            "application/pdf"
+        )
+
 # ------------------ CHAT DISPLAY ------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ------------------ ✅ ATTACHMENT SECTION (NEW LOCATION) ------------------
+# ------------------ ATTACHMENT ------------------
 st.divider()
 
-uploaded_file = st.file_uploader("📎 Attach file", key="chat_file")
+uploaded_file = st.file_uploader("Attach file", key="chat_file")
 
-# ✅ Show attached file
 if uploaded_file:
     st.session_state.file_name = uploaded_file.name
     file_type = uploaded_file.type or ""
     file_bytes = uploaded_file.read()
 
-    st.caption(f"📎 Attached: {uploaded_file.name}")
+    st.caption(f"Attached: {uploaded_file.name}")
 
     if file_type.startswith("image"):
         st.session_state.image = Image.open(BytesIO(file_bytes))
@@ -260,18 +241,15 @@ if user_input:
             else:
                 response = st.session_state.chat.send_message(user_input)
 
-            # ✅ SAFE RESPONSE EXTRACTION
-            output_text = ""
-
             if hasattr(response, "text") and response.text:
                 output_text = response.text
             elif hasattr(response, "candidates"):
                 try:
                     output_text = response.candidates[0].content.parts[0].text
                 except:
-                    output_text = "⚠️ Model returned no readable output."
+                    output_text = "Model returned no readable output."
             else:
-                output_text = "⚠️ No response from model."
+                output_text = "No response from model."
 
             clean_text = clean_output(output_text)
             formatted_text = make_links_clickable(clean_text)
