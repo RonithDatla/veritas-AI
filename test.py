@@ -5,7 +5,6 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
 import os
-
 from config import get_config, MODE_MAP, MODEL_OPTIONS
 from file_utils import *
 from formatting import clean_output, make_links_clickable
