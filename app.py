@@ -158,7 +158,7 @@ with col_right:
             if report_text:
                 content += report_text[:15000]
 
-            # ✅ stateless tool chat
+            #stateless tool chat
             chat = create_chat()
 
             if report_image:

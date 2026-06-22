@@ -15,7 +15,7 @@ def get_youtube_transcript(url):
 
         print("Available transcripts:", transcript_list)
 
-        # ✅ Try ALL transcripts one by one
+        # Try ALL transcripts one by one
         for transcript in transcript_list:
             try:
                 print("Trying:", transcript)
@@ -28,7 +28,7 @@ def get_youtube_transcript(url):
             except Exception as e:
                 print("Fetch failed:", e)
 
-        # ✅ Try translation fallback
+        # Try translation fallback
         for transcript in transcript_list:
             try:
                 print("Trying translate:", transcript)
