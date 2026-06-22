@@ -5,6 +5,14 @@ from docx import Document
 import pandas as pd
 import json
 
+def extract_text(response):
+    if hasattr(response, "text") and response.text:
+        return response.text
+    try:
+        return response.candidates[0].content.parts[0].text
+    except:
+        return "⚠️ No response text found"
+
 @st.cache_data
 def read_pdf_cached(file_bytes):
     try:

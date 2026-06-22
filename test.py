@@ -1,15 +1,20 @@
 import streamlit as st
 from google import genai
 from PIL import Image
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 from io import BytesIO
-import os
-from youtube_transcript_api import YouTubeTranscriptApi
 
 from config import get_config, MODE_MAP, MODEL_OPTIONS
 from file_utils import *
-from formatting import clean_output, make_links_clickable
+from formatting import clean_output
+from genai_utils import extract_text
+from yt_utils import get_youtube_transcript
+from pdf_utils import create_pdf
+
+def create_chat():
+    return st.session_state.client.chats.create(
+        model=st.session_state.model,
+        config=get_config(st.session_state.mode)
+    )
 
 # ------------------ CONSTANTS ------------------
 
@@ -17,14 +22,12 @@ REPORT_PROMPT = """
 You are an expert research analyst.
 
 Generate a high-quality structured report using:
-
 1. Title
 2. Abstract
 3. Key Insights
 4. Detailed Analysis
 5. Key Takeaways
 6. Conclusion
-
 Be precise, structured, and analytical.
 """
 
@@ -38,75 +41,21 @@ Rewrite using:
 - preserve meaning
 """
 
-# ------------------ YOUTUBE ------------------
-def get_youtube_transcript(url):
-    try:
-        import re
+# ------------------ FILE HANDLING ------------------
 
-        match = re.search(r"(v=|youtu\.be/)([^&?/]+)", url)
-        if not match:
-            print("Invalid URL")
-            return None
+def extract_file_text(file):
+    file_bytes = file.getvalue()
+    file_type = file.type or ""
 
-        video_id = match.group(2)
+    if file_type.startswith("image"):
+        return Image.open(BytesIO(file_bytes)), None
 
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-
-        print("Available transcripts:", transcript_list)
-
-        # ✅ Try ALL transcripts one by one
-        for transcript in transcript_list:
-            try:
-                print("Trying:", transcript)
-                result = transcript.fetch()
-
-                text = " ".join([t["text"] for t in result])
-                if text.strip():
-                    return text
-
-            except Exception as e:
-                print("Fetch failed:", e)
-
-        # ✅ Try translation fallback
-        for transcript in transcript_list:
-            try:
-                print("Trying translate:", transcript)
-                result = transcript.translate("en").fetch()
-
-                text = " ".join([t["text"] for t in result])
-                if text.strip():
-                    return text
-
-            except Exception as e:
-                print("Translate failed:", e)
-
-        print("All transcript attempts failed")
-        return None
-
-    except Exception as e:
-        print("Transcript error:", e)
-        return None
-    
-# ------------------ PDF ------------------
-
-def create_pdf(text):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-
-    height = letter[1]
-    y = height - 40
-
-    for line in text.split("\n"):
-        if y < 40:
-            c.showPage()
-            y = height - 40
-        c.setFont("Helvetica", 10)
-        c.drawString(40, y, line[:100])
-        y -= 15
-
-    c.save()
-    buffer.seek(0)
-    return buffer
+    if "pdf" in file_type:
+        return None, read_pdf_cached(file_bytes)
+    elif "word" in file_type:
+        return None, read_docx_cached(file_bytes)
+    else:
+        return None, read_txt_cached(file_bytes)
 
 # ------------------ APP ------------------
 
@@ -114,7 +63,9 @@ st.set_page_config(page_title="Veritas AI", layout="wide")
 st.title("🔍 Veritas AI")
 
 # ------------------ API ------------------
-st.session_state.client = genai.Client()
+
+if "client" not in st.session_state:
+    st.session_state.client = genai.Client()
 
 # ------------------ STATE ------------------
 
@@ -129,16 +80,10 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-# ------------------ CHAT ------------------
+# ------------------ MAIN CHAT ------------------
 
-def create_chat():
-    return st.session_state.client.chats.create(
-        model=st.session_state.model,
-        config=get_config(st.session_state.mode)
-    )
-
-if "chat" not in st.session_state:
-    st.session_state.chat = create_chat()
+if "chat_main" not in st.session_state:
+    st.session_state.chat_main = create_chat()
 
 # ------------------ SIDEBAR ------------------
 
@@ -147,11 +92,11 @@ with st.sidebar:
 
     if st.button("🧹 Clear Chat"):
         st.session_state.messages = []
-        st.session_state.chat = create_chat()
+        st.session_state.chat_main = create_chat()
         st.rerun()
 
     reverse_map = {v: k for k, v in MODE_MAP.items()}
-    current_display = reverse_map.get(st.session_state.mode, list(MODE_MAP.keys())[0])
+    current_display = reverse_map.get(st.session_state.mode)
 
     selected_display = st.selectbox(
         "Mode",
@@ -163,7 +108,7 @@ with st.sidebar:
 
     if selected_mode != st.session_state.mode:
         st.session_state.mode = selected_mode
-        st.session_state.chat = create_chat()
+        st.session_state.chat_main = create_chat()
         st.rerun()
 
     selected_model = st.selectbox(
@@ -174,7 +119,7 @@ with st.sidebar:
 
     if selected_model != st.session_state.model:
         st.session_state.model = selected_model
-        st.session_state.chat = create_chat()
+        st.session_state.chat_main = create_chat()
         st.rerun()
 
 # ------------------ LAYOUT ------------------
@@ -192,25 +137,15 @@ with col_right:
         report_instruction = st.text_area("Instructions")
         report_file = st.file_uploader("Upload file")
 
-        report_text = None
-        report_image = None
+        report_text, report_image = None, None
 
         if report_file:
-            file_bytes = report_file.getvalue()
-            file_type = report_file.type or ""
-
-            if file_type.startswith("image"):
-                report_image = Image.open(BytesIO(file_bytes))
+            report_image, report_text = extract_file_text(report_file)
+            if report_image:
                 st.image(report_image)
-            else:
-                if "pdf" in file_type:
-                    report_text = read_pdf_cached(file_bytes)
-                elif "word" in file_type:
-                    report_text = read_docx_cached(file_bytes)
-                else:
-                    report_text = read_txt_cached(file_bytes)
 
-        if st.button("Generate Report", key="report_btn"):
+        if st.button("Generate Report"):
+
             if not report_instruction and not report_file:
                 st.warning("Provide input.")
                 st.stop()
@@ -219,17 +154,19 @@ with col_right:
 
             if report_instruction:
                 content += report_instruction + "\n\n"
+
             if report_text:
                 content += report_text[:15000]
 
-            if report_image:
-                response = st.session_state.chat.send_message([content, report_image])
-            else:
-                response = st.session_state.chat.send_message(content)
+            # ✅ stateless tool chat
+            chat = create_chat()
 
-            st.session_state.report_output = clean_output(
-                getattr(response, "text", response.candidates[0].content.parts[0].text)
-            )
+            if report_image:
+                response = chat.send_message([content, report_image])
+            else:
+                response = chat.send_message(content)
+
+            st.session_state.report_output = clean_output(extract_text(response))
 
         if st.session_state.report_output:
             st.download_button(
@@ -241,23 +178,27 @@ with col_right:
     # ---------- POLISH ----------
     with st.expander("✍️ Polish Academic Document"):
 
-        polish_file = st.file_uploader("Upload document", key="polish_upload")
+        polish_file = st.file_uploader("Upload document")
 
-        if st.button("Polish", key="polish_btn"):
+        if st.button("Polish"):
 
             if not polish_file:
                 st.warning("Upload a document.")
                 st.stop()
 
-            text = read_txt_cached(polish_file.getvalue())
+            _, text = extract_file_text(polish_file)
 
-            response = st.session_state.chat.send_message(
+            if not text:
+                st.error("Could not extract text.")
+                st.stop()
+
+            chat = create_chat()
+
+            response = chat.send_message(
                 POLISH_PROMPT + "\n\n" + text[:15000]
             )
 
-            st.session_state.polish_output = clean_output(
-                getattr(response, "text", response.candidates[0].content.parts[0].text)
-            )
+            st.session_state.polish_output = clean_output(extract_text(response))
 
         if st.session_state.polish_output:
             st.download_button(
@@ -267,14 +208,14 @@ with col_right:
             )
 
     # ---------- YOUTUBE ----------
-    with st.expander("🎥 Summarize YouTube Video"):
+    with st.expander("🎥 Summarize YouTube"):
 
         yt_url = st.text_input("YouTube URL")
 
-        if st.button("Summarize Video", key="yt_btn"):
+        if st.button("Summarize"):
 
             if not yt_url:
-                st.warning("Provide a link.")
+                st.warning("Provide URL.")
                 st.stop()
 
             transcript = get_youtube_transcript(yt_url)
@@ -282,16 +223,13 @@ with col_right:
             if not transcript:
                 st.error("No transcript available.")
             else:
-                response = st.session_state.chat.send_message(
+                chat = create_chat()
+
+                response = chat.send_message(
                     REPORT_PROMPT + "\n\n" + transcript[:15000]
                 )
 
-                try:
-                    output_text = response.text
-                except:
-                    output_text = response.candidates[0].content.parts[0].text
-
-                st.session_state.yt_output = clean_output(output_text)
+                st.session_state.yt_output = clean_output(extract_text(response))
 
         if st.session_state.yt_output:
             st.download_button(
@@ -311,15 +249,14 @@ with col_main:
     user_input = st.chat_input("Ask something...")
 
     if user_input:
-        response = st.session_state.chat.send_message(user_input)
 
-        output_text = getattr(
-            response,
-            "text",
-            response.candidates[0].content.parts[0].text
-        )
+        st.session_state.messages.append({
+            "role": "user",
+            "content": user_input
+        })
 
-        clean_text = clean_output(output_text)
+        response = st.session_state.chat_main.send_message(user_input)
+        clean_text = clean_output(extract_text(response))
 
         st.session_state.messages.append({
             "role": "assistant",
