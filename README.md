@@ -10,7 +10,7 @@ It includes a chatbot and several tools for working with text, files, and videos
 - Chat assistant with memory
 - Report generator from files or prompts
 - Academic document polishing
-- YouTube video summarizer
+- YouTube video summarizer(currently out of service)
 
 ---
 
