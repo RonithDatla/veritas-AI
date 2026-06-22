@@ -114,13 +114,7 @@ st.set_page_config(page_title="Veritas AI", layout="wide")
 st.title("🔍 Veritas AI")
 
 # ------------------ API ------------------
-
-if "client" not in st.session_state:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        st.error("Missing API key.")
-        st.stop()
-    st.session_state.client = genai.Client(api_key=api_key)
+st.session_state.client = genai.Client()
 
 # ------------------ STATE ------------------
 
