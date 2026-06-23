@@ -1,0 +1,119 @@
+/* ------------------ GLOBAL APP ------------------ */
+
+.stApp {
+    background-color: #000000;   /* pitch black */
+    color: #e5e7eb;
+}
+
+/* ------------------ SIDEBAR (DULL GREY LIKE CHATGPT) ------------------ */
+
+section[data-testid="stSidebar"] {
+    background-color: #313235 !important;  /* ChatGPT-style grey */
+    border-right: 1px solid #2a2b2f;
+    color: #e5e7eb;
+}
+
+/* ------------------ TOP BAR (MATCH CHAT) ------------------ */
+
+header[data-testid="stHeader"] {
+    background-color: #000000 !important;  /* same as chat */
+}
+
+div[data-testid="stToolbar"] {
+    background-color: #000000 !important;
+}
+
+/* ensure icons visible */
+header button,
+div[data-testid="stToolbar"] button {
+    color: #e5e7eb !important;
+}
+
+header button:hover,
+div[data-testid="stToolbar"] button:hover {
+    background-color:  #313235 !important;
+}
+
+/* ------------------ CHAT MESSAGES ------------------ */
+
+[data-testid="stChatMessage"] {
+    background-color: #111111;  /* very dark grey bubble */
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+/* user messages (keep subtle, not bright) */
+[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-user"]) {
+    background-color: #1a1a1a;
+}
+
+/* assistant */
+[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-assistant"]) {
+    background-color: #111111;
+}
+
+/* ------------------ BUTTONS ------------------ */
+
+button {
+    background-color: #3b82f6 !important;
+    color: white !important;
+    border-radius: 8px !important;
+    border: none !important;
+    transition: 0.2s ease;
+}
+
+button:hover {
+    background-color: #2563eb !important;
+}
+
+/* ------------------ INPUT BOX ------------------ */
+
+textarea {
+    background-color: #1a1a1a !important;
+    color: #e5e7eb !important;
+    border-radius: 8px !important;
+}
+
+/* ------------------ FILE UPLOADER ------------------ */
+
+[data-testid="stFileUploader"] {
+    background-color: #1a1a1a;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+/* ------------------ EXPANDER ------------------ */
+
+details {
+    background-color:  #313235;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+/* ------------------ LINKS ------------------ */
+
+a {
+    color: #60a5fa;
+}
+
+/* ------------------ SCROLL BUTTON ------------------ */
+
+#scroll-btn {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    z-index: 1000;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* ------------------ SMOOTH SCROLL ------------------ */
+
+html {
+    scroll-behavior: smooth;
+}

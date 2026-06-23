@@ -59,8 +59,15 @@ def extract_file_text(file):
         return None, read_txt_cached(file_bytes)
 
 # ------------------ APP ------------------
+def load_css():
+    with open("styles.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 st.set_page_config(page_title="Veritas AI", layout="wide")
+
+load_css()
+
+
 st.title("🔍 Veritas AI")
 
 if "client" not in st.session_state:
