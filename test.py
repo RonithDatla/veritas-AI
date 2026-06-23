@@ -308,7 +308,6 @@ with col_main:
     st.markdown('<div id="bottom"></div>', unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask something...")
-
     if user_input:
 
         st.session_state.messages.append({
@@ -316,11 +315,20 @@ with col_main:
             "content": user_input
         })
 
-        #   CASE 1: No file
+        # ✅ CASE 1: Normal chat (no file)
         if not uploaded_file:
             response = st.session_state.chat_main.send_message(user_input)
 
-        #   CASE 2: Small document
+            clean_text = clean_output(extract_text(response))
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": clean_text
+            })
+
+            st.rerun()
+
+        # ✅ CASE 2: Small document (direct)
         elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
 
             prompt = f"""
@@ -333,8 +341,19 @@ with col_main:
                 """
 
             response = st.session_state.chat_main.send_message(prompt)
+            clean_text = clean_output(extract_text(response))
 
-        #   CASE 3: Large document (RAG)
+            # ✅ optional lightweight context note
+            final_output = f"{clean_text}\n\n(Note: Answer based on uploaded document)"
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": final_output
+            })
+
+            st.rerun()
+
+        # ✅ CASE 3: Large document (RAG + sources)
         elif "rag_ready" in st.session_state:
 
             query_vector = embed([user_input])[0]
@@ -345,11 +364,12 @@ with col_main:
                 k=3
             )
 
+            # ✅ include index + text
             retrieved_chunks = [
-                st.session_state.chunks[i] for i in top_indices
+                (i, st.session_state.chunks[i]) for i in top_indices
             ]
 
-            context = "\n\n".join(retrieved_chunks)
+            context = "\n\n".join(chunk for _, chunk in retrieved_chunks)
 
             prompt = f"""
                 Use the context below to answer the question. If incomplete, reason carefully.
@@ -362,15 +382,31 @@ with col_main:
                 """
 
             response = st.session_state.chat_main.send_message(prompt)
+            clean_text = clean_output(extract_text(response))
+
+            # ✅ Sources section ONLY for RAG
+            sources = "\n".join(
+                f"- Chunk {idx}: {chunk[:100]}..."
+                for idx, chunk in retrieved_chunks
+            )
+
+            final_output = f"{clean_text}\n\nSources:\n{sources}"
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": final_output
+            })
+
+            st.rerun()
 
         else:
             response = st.session_state.chat_main.send_message(user_input)
 
-        clean_text = clean_output(extract_text(response))
+            clean_text = clean_output(extract_text(response))
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": clean_text
-        })
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": clean_text
+            })
 
-        st.rerun()
+            st.rerun()
