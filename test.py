@@ -300,10 +300,11 @@ with col_main:
                 st.image(chat_image, use_column_width=True)
 
             #   Build RAG once for large files
-            if chat_text and len(chat_text) >= MAX_DIRECT_CHARS:
+            if chat_text:
                 if not st.session_state.get("rag_ready", False):
 
                     chunks = chunk_text(chat_text, CHUNK_SIZE, CHUNK_OVERLAP)
+
                     embeddings = embed(chunks)
                     index = build_index(embeddings)
 
@@ -337,30 +338,7 @@ with col_main:
 
         # (everything above unchanged…)
 
-        # ✅ CASE 2: Small document (direct)
-        elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
-
-            prompt = f"""Answer based on this document:
-
-{chat_text[:12000]}
-
-Question:
-{user_input}
-"""
-
-            response = st.session_state.chat_main.send_message(prompt)
-            clean_text = clean_output(extract_text(response))
-
-            final_output = f"{clean_text}\n\n(Note: Answer based on uploaded document)"
-
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": final_output
-            })
-
-            st.rerun()
-
-        # ✅ CASE 3: Large document (RAG + sources)
+        # ✅ CASE 2: Large document (RAG + sources)
         elif "rag_ready" in st.session_state:
 
             query_vector = embed([user_input])[0]
@@ -368,7 +346,7 @@ Question:
             top_indices = search_index(
                 st.session_state.index,
                 query_vector,
-                k=3
+                k=5
             )
 
             retrieved_chunks = [
@@ -377,7 +355,12 @@ Question:
 
             context = "\n\n".join(chunk for _, chunk in retrieved_chunks)
 
-            prompt = f"""Use the context below to answer the question. If incomplete, reason carefully.
+            prompt = f"""You are a precise AI assistant.
+
+Use ONLY the context below to answer the question.
+If the answer is not in the context, say "Not found in document".
+
+Be concise and accurate.
 
 Context:
 {context}
