@@ -2,8 +2,8 @@ import streamlit as st
 from google import genai
 from PIL import Image
 from io import BytesIO
-
-from config import get_config, MODE_MAP, MODEL_OPTIONS
+from rag_utils import chunk_text, embed, build_index, search_index
+from config import *
 from file_utils import *
 from formatting import clean_output
 from genai_utils import extract_text
@@ -16,46 +16,6 @@ def create_chat():
         config=get_config(st.session_state.mode)
     )
 
-# ------------------ RAG UTILITIES ------------------
-
-def chunk_text(text, chunk_size=800, overlap=150):
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-
-    return chunks
-
-
-#   Batched Gemini Embeddings
-def embed(text_list):
-    response = st.session_state.client.models.embed_content(
-        model="models/embedding-001",
-        contents=text_list
-    )
-    return [e.values for e in response.embeddings]
-
-
-def build_index(embeddings):
-    import faiss
-    import numpy as np
-
-    dim = len(embeddings[0])
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings).astype("float32"))
-
-    return index
-
-
-def search_index(index, query_vector, k=3):
-    import numpy as np
-
-    query_vector = np.array([query_vector]).astype("float32")
-    D, I = index.search(query_vector, k)
-    return I[0]
 
 # ------------------ CONSTANTS ------------------
 
@@ -99,8 +59,15 @@ def extract_file_text(file):
         return None, read_txt_cached(file_bytes)
 
 # ------------------ APP ------------------
+def load_css():
+    with open("styles.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 st.set_page_config(page_title="Veritas AI", layout="wide")
+
+load_css()
+
+
 st.title("🔍 Veritas AI")
 
 if "client" not in st.session_state:
@@ -315,7 +282,6 @@ with col_main:
             key="chat_file"
         )
 
-        MAX_DIRECT_CHARS = 12000
         chat_image, chat_text = None, None
 
         if uploaded_file:
@@ -337,7 +303,7 @@ with col_main:
             if chat_text and len(chat_text) >= MAX_DIRECT_CHARS:
                 if not st.session_state.get("rag_ready", False):
 
-                    chunks = chunk_text(chat_text)
+                    chunks = chunk_text(chat_text, CHUNK_SIZE, CHUNK_OVERLAP)
                     embeddings = embed(chunks)
                     index = build_index(embeddings)
 
@@ -349,7 +315,6 @@ with col_main:
     st.markdown('<div id="bottom"></div>', unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask something...")
-
     if user_input:
 
         st.session_state.messages.append({
@@ -357,25 +322,45 @@ with col_main:
             "content": user_input
         })
 
-        #   CASE 1: No file
+        # ✅ CASE 1: Normal chat (no file)
         if not uploaded_file:
             response = st.session_state.chat_main.send_message(user_input)
 
-        #   CASE 2: Small document
+            clean_text = clean_output(extract_text(response))
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": clean_text
+            })
+
+            st.rerun()
+
+        # (everything above unchanged…)
+
+        # ✅ CASE 2: Small document (direct)
         elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
 
-            prompt = f"""
-                Answer based on this document:
+            prompt = f"""Answer based on this document:
 
-                {chat_text[:12000]}
+{chat_text[:12000]}
 
-                Question:
-                {user_input}
-                """
+Question:
+{user_input}
+"""
 
             response = st.session_state.chat_main.send_message(prompt)
+            clean_text = clean_output(extract_text(response))
 
-        #   CASE 3: Large document (RAG)
+            final_output = f"{clean_text}\n\n(Note: Answer based on uploaded document)"
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": final_output
+            })
+
+            st.rerun()
+
+        # ✅ CASE 3: Large document (RAG + sources)
         elif "rag_ready" in st.session_state:
 
             query_vector = embed([user_input])[0]
@@ -387,31 +372,52 @@ with col_main:
             )
 
             retrieved_chunks = [
-                st.session_state.chunks[i] for i in top_indices
+                (i, st.session_state.chunks[i]) for i in top_indices
             ]
 
-            context = "\n\n".join(retrieved_chunks)
+            context = "\n\n".join(chunk for _, chunk in retrieved_chunks)
 
-            prompt = f"""
-                Use the context below to answer the question. If incomplete, reason carefully.
+            prompt = f"""Use the context below to answer the question. If incomplete, reason carefully.
 
-                Context:
-                {context}
+Context:
+{context}
 
-                Question:
-                {user_input}
-                """
+Question:
+{user_input}
+"""
 
             response = st.session_state.chat_main.send_message(prompt)
+            clean_text = clean_output(extract_text(response))
+
+            # ✅ FIXED: cleaner preview (no broken words)
+            sources = "\n".join(
+                f"- Chunk {idx}: {chunk[:100].rsplit(' ', 1)[0]}..."
+                for idx, chunk in retrieved_chunks
+            )
+
+            final_output = f"{clean_text}\n\nSources:\n{sources}"
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": final_output
+            })
+
+            # ✅ Optional: better UX (expandable sources)
+            with st.expander("Sources (Preview)"):
+                for idx, chunk in retrieved_chunks:
+                    st.markdown(f"**Chunk {idx}**")
+                    st.write(chunk[:200])
+
+            st.rerun()
 
         else:
             response = st.session_state.chat_main.send_message(user_input)
 
-        clean_text = clean_output(extract_text(response))
+            clean_text = clean_output(extract_text(response))
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": clean_text
-        })
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": clean_text
+            })
 
-        st.rerun()
+            st.rerun()
