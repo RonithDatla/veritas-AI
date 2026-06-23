@@ -5,3 +5,4 @@ reportlab
 youtube-transcript-api
 pypdf
 python-docx
+faiss-cpu
