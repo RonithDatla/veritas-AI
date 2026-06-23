@@ -328,22 +328,22 @@ with col_main:
 
             st.rerun()
 
+        # (everything above unchanged…)
+
         # ✅ CASE 2: Small document (direct)
         elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
 
-            prompt = f"""
-                Answer based on this document:
+            prompt = f"""Answer based on this document:
 
-                {chat_text[:12000]}
+{chat_text[:12000]}
 
-                Question:
-                {user_input}
-                """
+Question:
+{user_input}
+"""
 
             response = st.session_state.chat_main.send_message(prompt)
             clean_text = clean_output(extract_text(response))
 
-            # ✅ optional lightweight context note
             final_output = f"{clean_text}\n\n(Note: Answer based on uploaded document)"
 
             st.session_state.messages.append({
@@ -364,29 +364,27 @@ with col_main:
                 k=3
             )
 
-            # ✅ include index + text
             retrieved_chunks = [
                 (i, st.session_state.chunks[i]) for i in top_indices
             ]
 
             context = "\n\n".join(chunk for _, chunk in retrieved_chunks)
 
-            prompt = f"""
-                Use the context below to answer the question. If incomplete, reason carefully.
+            prompt = f"""Use the context below to answer the question. If incomplete, reason carefully.
 
-                Context:
-                {context}
+Context:
+{context}
 
-                Question:
-                {user_input}
-                """
+Question:
+{user_input}
+"""
 
             response = st.session_state.chat_main.send_message(prompt)
             clean_text = clean_output(extract_text(response))
 
-            # ✅ Sources section ONLY for RAG
+            # ✅ FIXED: cleaner preview (no broken words)
             sources = "\n".join(
-                f"- Chunk {idx}: {chunk[:100]}..."
+                f"- Chunk {idx}: {chunk[:100].rsplit(' ', 1)[0]}..."
                 for idx, chunk in retrieved_chunks
             )
 
@@ -396,6 +394,12 @@ with col_main:
                 "role": "assistant",
                 "content": final_output
             })
+
+            # ✅ Optional: better UX (expandable sources)
+            with st.expander("Sources (Preview)"):
+                for idx, chunk in retrieved_chunks:
+                    st.markdown(f"**Chunk {idx}**")
+                    st.write(chunk[:200])
 
             st.rerun()
 
