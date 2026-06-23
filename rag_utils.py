@@ -5,13 +5,6 @@ import streamlit as st
 import re
 
 def chunk_text(text, chunk_size=500, overlap=50):
-    """
-    Recursive chunking:
-    1. Split by paragraphs
-    2. If too big → split into sentences
-    3. Ensure chunks stay within token/word limits
-    """
-
     # --- Step 1: split into paragraphs ---
     paragraphs = text.split("\n\n")
 
@@ -21,12 +14,10 @@ def chunk_text(text, chunk_size=500, overlap=50):
 
         words = para.split()
 
-        # ✅ If paragraph is small enough → keep it
         if len(words) <= chunk_size:
             final_chunks.append(para.strip())
             continue
 
-        # --- Step 2: split into sentences ---
         sentences = re.split(r'(?<=[.!?]) +', para)
 
         current_chunk = []
@@ -35,21 +26,20 @@ def chunk_text(text, chunk_size=500, overlap=50):
         for sentence in sentences:
             sent_words = sentence.split()
 
-            # ✅ If adding sentence stays within limit → add it
             if current_length + len(sent_words) <= chunk_size:
                 current_chunk.append(sentence)
                 current_length += len(sent_words)
 
             else:
-                # ✅ Save current chunk
+
                 if current_chunk:
                     final_chunks.append(" ".join(current_chunk))
 
-                # ✅ Start new chunk
+                
                 current_chunk = [sentence]
                 current_length = len(sent_words)
 
-        # ✅ Add last chunk
+        
         if current_chunk:
             final_chunks.append(" ".join(current_chunk))
 
@@ -80,7 +70,6 @@ def embed(text_list):
 
     vectors = [e.values for e in response.embeddings]
 
-    # ✅ Normalize (critical)
     vectors = [v / np.linalg.norm(v) for v in vectors]
 
     return vectors
