@@ -2,8 +2,8 @@ import streamlit as st
 from google import genai
 from PIL import Image
 from io import BytesIO
-
-from config import get_config, MODE_MAP, MODEL_OPTIONS
+from rag_utils import chunk_text, embed, build_index, search_index
+from config import *
 from file_utils import *
 from formatting import clean_output
 from genai_utils import extract_text
@@ -16,46 +16,6 @@ def create_chat():
         config=get_config(st.session_state.mode)
     )
 
-# ------------------ RAG UTILITIES ------------------
-
-def chunk_text(text, chunk_size=800, overlap=150):
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-
-    return chunks
-
-
-# ✅ Batched Gemini Embeddings
-def embed(text_list):
-    response = st.session_state.client.models.embed_content(
-        model="models/embedding-001",
-        contents=text_list
-    )
-    return [e.values for e in response.embeddings]
-
-
-def build_index(embeddings):
-    import faiss
-    import numpy as np
-
-    dim = len(embeddings[0])
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings).astype("float32"))
-
-    return index
-
-
-def search_index(index, query_vector, k=3):
-    import numpy as np
-
-    query_vector = np.array([query_vector]).astype("float32")
-    D, I = index.search(query_vector, k)
-    return I[0]
 
 # ------------------ CONSTANTS ------------------
 
@@ -274,7 +234,7 @@ with col_right:
 
 # ------------------ CHAT ------------------
 
-# ✅ Scroll-to-bottom button
+#   Scroll-to-bottom button
 st.markdown("""
 <style>
 #scroll-btn {
@@ -299,12 +259,12 @@ st.markdown("""
 
 with col_main:
 
-    # ✅ Show chat history first
+    #   Show chat history first
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # ✅ Bottom container (file + preview near prompt)
+    #   Bottom container (file + preview near prompt)
     bottom_container = st.container()
 
     with bottom_container:
@@ -315,13 +275,12 @@ with col_main:
             key="chat_file"
         )
 
-        MAX_DIRECT_CHARS = 12000
         chat_image, chat_text = None, None
 
         if uploaded_file:
             file_id = uploaded_file.name
 
-            # ✅ Reset RAG if new file
+            #   Reset RAG if new file
             if st.session_state.get("current_file") != file_id:
                 st.session_state.current_file = file_id
                 st.session_state.rag_ready = False
@@ -333,11 +292,11 @@ with col_main:
             if chat_image:
                 st.image(chat_image, use_column_width=True)
 
-            # ✅ Build RAG once for large files
+            #   Build RAG once for large files
             if chat_text and len(chat_text) >= MAX_DIRECT_CHARS:
                 if not st.session_state.get("rag_ready", False):
 
-                    chunks = chunk_text(chat_text)
+                    chunks = chunk_text(chat_text, CHUNK_SIZE, CHUNK_OVERLAP)
                     embeddings = embed(chunks)
                     index = build_index(embeddings)
 
@@ -345,7 +304,7 @@ with col_main:
                     st.session_state.chunks = chunks
                     st.session_state.rag_ready = True
 
-    # ✅ Chat input pinned at bottom
+    #   Chat input pinned at bottom
     st.markdown('<div id="bottom"></div>', unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask something...")
@@ -357,11 +316,11 @@ with col_main:
             "content": user_input
         })
 
-        # ✅ CASE 1: No file
+        #   CASE 1: No file
         if not uploaded_file:
             response = st.session_state.chat_main.send_message(user_input)
 
-        # ✅ CASE 2: Small document
+        #   CASE 2: Small document
         elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
 
             prompt = f"""
@@ -375,7 +334,7 @@ with col_main:
 
             response = st.session_state.chat_main.send_message(prompt)
 
-        # ✅ CASE 3: Large document (RAG)
+        #   CASE 3: Large document (RAG)
         elif "rag_ready" in st.session_state:
 
             query_vector = embed([user_input])[0]

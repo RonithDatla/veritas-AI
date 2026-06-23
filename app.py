@@ -16,6 +16,47 @@ def create_chat():
         config=get_config(st.session_state.mode)
     )
 
+# ------------------ RAG UTILITIES ------------------
+
+def chunk_text(text, chunk_size=800, overlap=150):
+    chunks = []
+    start = 0
+
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
+
+    return chunks
+
+
+#   Batched Gemini Embeddings
+def embed(text_list):
+    response = st.session_state.client.models.embed_content(
+        model="models/embedding-001",
+        contents=text_list
+    )
+    return [e.values for e in response.embeddings]
+
+
+def build_index(embeddings):
+    import faiss
+    import numpy as np
+
+    dim = len(embeddings[0])
+    index = faiss.IndexFlatL2(dim)
+    index.add(np.array(embeddings).astype("float32"))
+
+    return index
+
+
+def search_index(index, query_vector, k=3):
+    import numpy as np
+
+    query_vector = np.array([query_vector]).astype("float32")
+    D, I = index.search(query_vector, k)
+    return I[0]
+
 # ------------------ CONSTANTS ------------------
 
 REPORT_PROMPT = """
@@ -62,12 +103,8 @@ def extract_file_text(file):
 st.set_page_config(page_title="Veritas AI", layout="wide")
 st.title("🔍 Veritas AI")
 
-# ------------------ API ------------------
-
 if "client" not in st.session_state:
     st.session_state.client = genai.Client()
-
-# ------------------ STATE ------------------
 
 for key, default in {
     "mode": "balanced",
@@ -79,8 +116,6 @@ for key, default in {
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
-
-# ------------------ MAIN CHAT ------------------
 
 if "chat_main" not in st.session_state:
     st.session_state.chat_main = create_chat()
@@ -135,7 +170,7 @@ with col_right:
     with st.expander("📄 Generate Report"):
 
         report_instruction = st.text_area("Instructions")
-        report_file = st.file_uploader("Upload file")
+        report_file = st.file_uploader("Upload file", key="report_upload")
 
         report_text, report_image = None, None
 
@@ -158,7 +193,6 @@ with col_right:
             if report_text:
                 content += report_text[:15000]
 
-            #stateless tool chat
             chat = create_chat()
 
             if report_image:
@@ -178,7 +212,7 @@ with col_right:
     # ---------- POLISH ----------
     with st.expander("✍️ Polish Academic Document"):
 
-        polish_file = st.file_uploader("Upload document")
+        polish_file = st.file_uploader("Upload document", key="polish_upload")
 
         if st.button("Polish"):
 
@@ -240,11 +274,79 @@ with col_right:
 
 # ------------------ CHAT ------------------
 
+#   Scroll-to-bottom button
+st.markdown("""
+<style>
+#scroll-btn {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    z-index: 1000;
+    background-color: #262730;
+    color: white;
+    border: none;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    text-decoration: none;
+}
+</style>
+
+<a href="#bottom" id="scroll-btn">⬇</a>
+""", unsafe_allow_html=True)
+
+
 with col_main:
 
+    #   Show chat history first
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+
+    #   Bottom container (file + preview near prompt)
+    bottom_container = st.container()
+
+    with bottom_container:
+
+        uploaded_file = st.file_uploader(
+            "📎 Attach",
+            type=["pdf", "txt", "docx", "png", "jpg", "jpeg"],
+            key="chat_file"
+        )
+
+        MAX_DIRECT_CHARS = 12000
+        chat_image, chat_text = None, None
+
+        if uploaded_file:
+            file_id = uploaded_file.name
+
+            #   Reset RAG if new file
+            if st.session_state.get("current_file") != file_id:
+                st.session_state.current_file = file_id
+                st.session_state.rag_ready = False
+
+            chat_image, chat_text = extract_file_text(uploaded_file)
+
+            st.caption(f"📄 {uploaded_file.name}")
+
+            if chat_image:
+                st.image(chat_image, use_column_width=True)
+
+            #   Build RAG once for large files
+            if chat_text and len(chat_text) >= MAX_DIRECT_CHARS:
+                if not st.session_state.get("rag_ready", False):
+
+                    chunks = chunk_text(chat_text)
+                    embeddings = embed(chunks)
+                    index = build_index(embeddings)
+
+                    st.session_state.index = index
+                    st.session_state.chunks = chunks
+                    st.session_state.rag_ready = True
+
+    #   Chat input pinned at bottom
+    st.markdown('<div id="bottom"></div>', unsafe_allow_html=True)
 
     user_input = st.chat_input("Ask something...")
 
@@ -255,7 +357,56 @@ with col_main:
             "content": user_input
         })
 
-        response = st.session_state.chat_main.send_message(user_input)
+        #   CASE 1: No file
+        if not uploaded_file:
+            response = st.session_state.chat_main.send_message(user_input)
+
+        #   CASE 2: Small document
+        elif chat_text and len(chat_text) < MAX_DIRECT_CHARS:
+
+            prompt = f"""
+                Answer based on this document:
+
+                {chat_text[:12000]}
+
+                Question:
+                {user_input}
+                """
+
+            response = st.session_state.chat_main.send_message(prompt)
+
+        #   CASE 3: Large document (RAG)
+        elif "rag_ready" in st.session_state:
+
+            query_vector = embed([user_input])[0]
+
+            top_indices = search_index(
+                st.session_state.index,
+                query_vector,
+                k=3
+            )
+
+            retrieved_chunks = [
+                st.session_state.chunks[i] for i in top_indices
+            ]
+
+            context = "\n\n".join(retrieved_chunks)
+
+            prompt = f"""
+                Use the context below to answer the question. If incomplete, reason carefully.
+
+                Context:
+                {context}
+
+                Question:
+                {user_input}
+                """
+
+            response = st.session_state.chat_main.send_message(prompt)
+
+        else:
+            response = st.session_state.chat_main.send_message(user_input)
+
         clean_text = clean_output(extract_text(response))
 
         st.session_state.messages.append({

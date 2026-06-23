@@ -1,5 +1,10 @@
 from google.genai import types
 
+MAX_DIRECT_CHARS = 12000
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+TOP_K = 3
+
 # ------------------ MODES ------------------
 MODES = {
     "precise": 0.1,
