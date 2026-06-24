@@ -369,5 +369,5 @@ Question:
                 "role": "assistant",
                 "content": clean_text
             })
-
+        
             st.rerun()

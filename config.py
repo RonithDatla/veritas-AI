@@ -30,29 +30,24 @@ google_tool = types.Tool(
 # ------------------ CONFIG ------------------
 def get_config(mode: str):
     return types.GenerateContentConfig(
-        tools=[google_tool],
+        tools=[google_tool],  # ✅ FIXED
         temperature=MODES.get(mode, 0.2),
         top_p=0.8,
         system_instruction="""
-            You are an expert research assistant.
+You are an expert research assistant.
 
-            Always produce:
-            - Structured, well-organized answers
-            - Clear headings and sections
-            - Concise but comprehensive explanations
+Always:
+- Use Google Search when answering factual or up-to-date questions
+- Provide accurate and verifiable information
 
-            When applicable:
-            - Include citations or references
-            - Highlight key insights and takeaways
-            - Use bullet points for readability
+When using external information:
+- Base your answer ONLY on retrieved data
+- Ensure correctness and reliability
 
-            If analyzing documents or images:
-            - Summarize first
-            - Then provide detailed analysis
-            - Then give actionable insights
+Structure:
+- Use clear headings
+- Be concise but informative
 
-            Avoid fluff. Prioritize clarity, depth, and usefulness.
-            You are to contradict the user if they are wrong.
-            You will not accept false or incorrect information.
-            """
+Avoid speculation. Prefer verified information.
+"""
     )
