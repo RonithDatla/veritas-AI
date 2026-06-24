@@ -4,6 +4,24 @@ from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
 import json
+from PIL import Image
+from io import BytesIO
+
+def extract_file_text(file):
+    file_bytes = file.getvalue()
+    file_type = file.type or ""
+
+    if file_type.startswith("image"):
+        return Image.open(BytesIO(file_bytes)), None
+
+    if "pdf" in file_type:
+        return None, read_pdf_cached(file_bytes)
+
+    elif "word" in file_type:
+        return None, read_docx_cached(file_bytes)
+
+    else:
+        return None, read_txt_cached(file_bytes)
 
 def extract_text(response):
     if hasattr(response, "text") and response.text:

@@ -3,6 +3,14 @@ import faiss
 import streamlit as st
 
 import re
+import streamlit as st
+
+@st.cache_data
+def build_rag(text):
+    chunks = chunk_text(text)
+    embeddings = embed(chunks)
+    index = build_index(embeddings)
+    return chunks, index
 
 def chunk_text(text, chunk_size=500, overlap=50):
     # --- Step 1: split into paragraphs ---
@@ -86,3 +94,19 @@ def search_index(index, query_vector, k=5):
     query_vector = np.array([query_vector]).astype("float32")
     D, I = index.search(query_vector, k)
     return I[0]
+
+def build_rag(text):
+    chunks = chunk_text(text)
+    embeddings = embed(chunks)
+    index = build_index(embeddings)
+    return chunks, index
+
+
+def query_rag(index, chunks, query):
+    q_vec = embed([query])[0]
+    top_idx = search_index(index, q_vec)
+
+    results = [(i, chunks[i]) for i in top_idx]
+    context = "\n\n".join(chunk for _, chunk in results)
+
+    return context, results

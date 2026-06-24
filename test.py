@@ -2,13 +2,12 @@ import streamlit as st
 from google import genai
 from PIL import Image
 from io import BytesIO
-from rag_utils import chunk_text, embed, build_index, search_index
+from Core.rag_pipeline import chunk_text, embed, build_index, search_index
 from config import *
-from file_utils import *
-from formatting import clean_output
-from genai_utils import extract_text
-from yt_utils import get_youtube_transcript
-from pdf_utils import create_pdf
+from Utils.file_utils import *
+from Utils.formatting_utils import clean_output
+from Utils.genai_utils import extract_text
+from Utils.pdf_utils import create_pdf
 
 def create_chat():
     return st.session_state.client.chats.create(
@@ -207,38 +206,6 @@ with col_right:
                 create_pdf(st.session_state.polish_output),
                 "polished.pdf"
             )
-
-    # ---------- YOUTUBE ----------
-    with st.expander("🎥 Summarize YouTube"):
-
-        yt_url = st.text_input("YouTube URL")
-
-        if st.button("Summarize"):
-
-            if not yt_url:
-                st.warning("Provide URL.")
-                st.stop()
-
-            transcript = get_youtube_transcript(yt_url)
-
-            if not transcript:
-                st.error("No transcript available.")
-            else:
-                chat = create_chat()
-
-                response = chat.send_message(
-                    REPORT_PROMPT + "\n\n" + transcript[:15000]
-                )
-
-                st.session_state.yt_output = clean_output(extract_text(response))
-
-        if st.session_state.yt_output:
-            st.download_button(
-                "⬇️ Download Summary",
-                create_pdf(st.session_state.yt_output),
-                "youtube_summary.pdf"
-            )
-
 # ------------------ CHAT ------------------
 
 #   Scroll-to-bottom button

@@ -1,119 +1,105 @@
-/* ------------------ GLOBAL APP ------------------ */
-
-.stApp {
-    background-color: #000000;   /* pitch black */
-    color: #e5e7eb;
+:root {
+    --primary: #4f46e5;
+    --bg: #0e1117;
+    --card: #111827;
 }
 
-/* ------------------ SIDEBAR (DULL GREY LIKE CHATGPT) ------------------ */
+/* ----------- GENERAL APP ----------- */
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Improve spacing */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+
+/* ----------- SIDEBAR ----------- */
 
 section[data-testid="stSidebar"] {
-    background-color: #313235 !important;  /* ChatGPT-style grey */
-    border-right: 1px solid #2a2b2f;
-    color: #e5e7eb;
+    background-color: #3d4557;
+    border-right: 1px solid #222;
 }
 
-/* ------------------ TOP BAR (MATCH CHAT) ------------------ */
+/* ----------- CHAT ----------- */
 
-header[data-testid="stHeader"] {
-    background-color: #000000 !important;  /* same as chat */
-}
-
-div[data-testid="stToolbar"] {
-    background-color: #000000 !important;
-}
-
-/* ensure icons visible */
-header button,
-div[data-testid="stToolbar"] button {
-    color: #e5e7eb !important;
-}
-
-header button:hover,
-div[data-testid="stToolbar"] button:hover {
-    background-color:  #313235 !important;
-}
-
-/* ------------------ CHAT MESSAGES ------------------ */
-
-[data-testid="stChatMessage"] {
-    background-color: #111111;  /* very dark grey bubble */
+.stChatMessage {
+    padding: 10px 14px;
     border-radius: 10px;
-    padding: 12px;
     margin-bottom: 10px;
 }
 
-/* user messages (keep subtle, not bright) */
-[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-user"]) {
-    background-color: #1a1a1a;
+[data-testid="stChatMessage-user"] {
+    background-color: #1f2937;
 }
 
-/* assistant */
-[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-assistant"]) {
-    background-color: #111111;
+[data-testid="stChatMessage-assistant"] {
+    background-color: #111827;
 }
 
-/* ------------------ BUTTONS ------------------ */
+/* ----------- BUTTONS ----------- */
 
+/* ✅ Default buttons = BLUE */
 button {
-    background-color: #3b82f6 !important;
-    color: white !important;
     border-radius: 8px !important;
-    border: none !important;
     transition: 0.2s ease;
+    background-color: var(--primary) !important;
+    color: white !important;
+    border: none;
 }
 
+/* Hover effect */
 button:hover {
-    background-color: #2563eb !important;
+    transform: scale(1.02);
+    filter: brightness(1.1);
 }
 
-/* ------------------ INPUT BOX ------------------ */
-
-textarea {
-    background-color: #1a1a1a !important;
-    color: #e5e7eb !important;
-    border-radius: 8px !important;
+/* ✅ CLEAR BUTTON = YELLOW */
+button[kind="secondary"] {
+    background-color: #6a5de3 !important;  /* yellow */
+    color: black !important;
 }
 
-/* ------------------ FILE UPLOADER ------------------ */
+/* ----------- FILE UPLOADER ----------- */
 
 [data-testid="stFileUploader"] {
-    background-color: #1a1a1a;
-    padding: 10px;
-    border-radius: 10px;
+    border: 1px dashed #444;
+    padding: 8px;
+    border-radius: 8px;
 }
 
-/* ------------------ EXPANDER ------------------ */
+/* ----------- EXPANDERS ----------- */
 
 details {
-    background-color:  #313235;
+    border: 1px solid #222;
     border-radius: 8px;
-    padding: 8px;
+    padding: 6px;
 }
 
-/* ------------------ LINKS ------------------ */
-
-a {
-    color: #60a5fa;
-}
-
-/* ------------------ SCROLL BUTTON ------------------ */
+/* ----------- SCROLL BUTTON ----------- */
 
 #scroll-btn {
     position: fixed;
     bottom: 90px;
     right: 20px;
     z-index: 1000;
-    background-color: #3b82f6;
+    background-color: #262730;
     color: white;
     border: none;
     padding: 10px 12px;
     border-radius: 8px;
     cursor: pointer;
+    font-size: 16px;
 }
 
-/* ------------------ SMOOTH SCROLL ------------------ */
+/* ----------- REMOVE DEFAULT CLUTTER ----------- */
 
-html {
-    scroll-behavior: smooth;
+footer {
+    visibility: hidden;
+}
+
+#MainMenu {
+    visibility: hidden;
 }
