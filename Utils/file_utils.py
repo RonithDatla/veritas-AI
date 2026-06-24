@@ -6,7 +6,18 @@ import pandas as pd
 import json
 from PIL import Image
 
+@st.cache_data
+def read_pdf_cached(file_bytes):
+    reader = PdfReader(BytesIO(file_bytes))
 
+    pages = []
+
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            pages.append(text)
+
+    return pages
 # ------------------ MAIN FILE ROUTER ------------------
 
 def extract_file_text(file):
@@ -36,26 +47,6 @@ def extract_text(response):
     except:
         return "⚠️ No response text found"
 
-
-# ------------------ PDF (FIXED ✅) ------------------
-
-@st.cache_data
-def read_pdf_cached(file_bytes):
-    try:
-        reader = PdfReader(BytesIO(file_bytes))
-        
-        pages = []
-
-        for page in reader.pages:
-            text = page.extract_text()
-
-            if text:  # ✅ avoid None
-                pages.append(text)
-
-        return pages  # ✅ IMPORTANT: list of pages
-
-    except:
-        return None
 
 
 # ------------------ OTHER FILE TYPES ------------------
